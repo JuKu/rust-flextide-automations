@@ -1,4 +1,5 @@
-# Flextide – A Modern, Modular, High-Performance Workflow Automation Platform  
+# Flextide – A Modern, Modular, High-Performance Workflow Automation Platform
+
 Built with **Rust**, **WASM**, **JS/TS sandboxing**, and **Next.js**.
 
 Flextide is a next-generation alternative to tools like n8n or Zapier, designed with a focus on **performance**, **security**, **extensibility**, and **developer experience**.  
@@ -51,7 +52,8 @@ Separate Rust crates for:
 
 ### ✅ Enterprise-Ready  
 - Self-hosted or cloud deployment  
-- MySQL & S3/Minio storage  
+- MySQL & PostgreSQL support (via sqlx)  
+- S3/Minio storage (optional, for later)  
 - Strong security isolation  
 - High reliability  
 - Horizontal scaling through multiple workers
@@ -71,8 +73,8 @@ Separate Rust crates for:
   api.rs # Starts API server
   worker.rs # Starts execution worker
 
-/frontend # Next.js app containing editor + dashboard
-/migrations # SQLx migrations for MySQL
+/frontend # Next.js 16 app containing editor + dashboard
+/migrations # SQLx migrations for MySQL & PostgreSQL
 
 ## 🚀 Getting Started
 
@@ -85,8 +87,14 @@ rustup target add wasm32-wasip1
 
 ### 2. Install SQLx CLI (for migrations)
 
+For MySQL:
 ```shell
 cargo install sqlx-cli --no-default-features --features mysql,native-tls
+```
+
+For PostgreSQL:
+```shell
+cargo install sqlx-cli --no-default-features --features postgres,native-tls
 ```
 
 ### 3. Install frontend dependencies
@@ -121,7 +129,7 @@ pnpm run dev
 
 ## 🧩 Writing Custom Nodes
 
-Fluxo supports three types of nodes:
+Flextide supports three types of nodes:
 
 ✅ JavaScript / TypeScript Nodes
   - User writes TS/JS
@@ -130,7 +138,7 @@ Fluxo supports three types of nodes:
   - Full JSON ABI support
 
 ✅ Rust → WASM Nodes
-  - Built using wasm32-wasi target
+  - Built using wasm32-wasip1 target
   - Executed inside Wasmtime
   - Perfect for high-performance or secure logic
 
@@ -143,7 +151,7 @@ Full node ABI documentation is available in /docs/node-abi.md.
 
 ## 🛒 Node Marketplace (WIP)
 
-Fluxo includes a full marketplace system where users can:
+Flextide includes a full marketplace system where users can:
   - Upload node packs (*.zip)
   - Include multiple nodes per pack
   - Provide schema, code, icons, and documentation

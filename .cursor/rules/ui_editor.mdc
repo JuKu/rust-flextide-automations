@@ -24,4 +24,4 @@ Graph Export:
 - Editor exports workflow JSON matching Core schema.
 - Node position stored as x/y.
 - Edge IDs encoded as `${nodeId}:${pinId}`.
-- Nodes can have configuration and authentication data (e.q. credentialID), which have to be stored too.
+- Nodes can have configuration and authentication data (e.g. credentialID), which have to be stored too.

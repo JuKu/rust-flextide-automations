@@ -19,9 +19,10 @@ General rules:
 - Every Node must follow the Node ABI defined in `node_system.mdc`.
 - Every code change must keep the platform modular, sandboxed, and secure.
 - JS/TS code for nodes must always be compiled through the Node Build Pipeline.
-- WASM nodes must be built via Rust target `wasm32-wasi`.
+- WASM nodes must be built via Rust target `wasm32-wasip1`.
 - Graph Editor must follow the UI and pin rules in `ui_editor.mdc`.
 - Frontend package management: Always use `pnpm` instead of `npm` for all frontend operations.
+- Documentation organization: End user documentation belongs in `docs/end-user-docs/`, while technical documentation and requirements belong in `docs/`.
 
 Security:
 - Worker must sandbox JS using QuickJS runtime.

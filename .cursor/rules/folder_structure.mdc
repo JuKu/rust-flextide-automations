@@ -24,3 +24,8 @@ Root:
   /editor
   /marketplace
   /nodes
+
+/docs
+  /end-user-docs    → End user documentation (user guides, tutorials, how-tos)
+  Requirements.md   → Technical requirements and specifications
+  (other technical docs)

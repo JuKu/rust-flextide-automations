@@ -45,7 +45,7 @@ JS/TS Node Execution Pipeline:
   * Output must be JSON
 
 WASM Nodes:
-  - Compiled with wasm32-wasi
+  - Compiled with wasm32-wasip1
   - Executed inside Wasmtime
   - ABI: JSON via stdin/stdout
 
