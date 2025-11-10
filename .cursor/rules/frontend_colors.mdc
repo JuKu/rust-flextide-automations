@@ -1,0 +1,91 @@
+---
+alwaysApply: false
+description: Defines the complete Flextide UI color palette including primary, secondary, neutral, semantic, and dark mode colors. Provides hex values and usage guidelines for consistent visual design.
+---
+
+# 🎨 Recommended Flextide UI Color Palette
+
+## 1. Primary Colors
+
+### ✅ Primary (Brand Blue)
+
+Hex: #3B3B4D
+A deep navy gray-blue
+Impression: modern, trustworthy, technical
+Used for:
+  - Header
+  - Buttons (Primary)
+  - Focus states
+  - Logo text
+
+### ✅ Primary Accent
+
+Hex: #5667FF
+A friendly, slightly futuristic tint
+Used for:
+  - Highlights
+  - Icons
+  - Node selection in the workflow editor
+
+## 2. Secondary Colors
+
+### ✅ Secondary Teal
+
+Hex: #3BCBB8
+Used for:
+  - Success messages
+  - Secondary interactions
+  - Optional for specific node categories (Data Nodes, AI Nodes)
+
+### ✅ Secondary Purple
+
+Hex: #7A6FF0
+Used for:
+  - Editor details
+  - Marketplace visual identity
+  - Node borders
+
+## 3. Neutral Colors
+
+This neutral palette keeps everything calm and professional — important for a productive tool.
+
+### ✅ Neutral Light Background
+
+Hex: #F7F8FA
+
+### ✅ Neutral Panel Background
+
+Hex: #FFFFFF
+
+### ✅ Neutral Border
+
+Hex: #E2E4E9
+
+### ✅ Neutral Text Dark
+
+Hex: #121417
+
+### ✅ Neutral Text Medium
+
+Hex: #555A62
+
+## 4. Semantic Colors
+
+✅ Success: #1DBF73
+✅ Warning: #FFB74D
+✅ Error: #E53935
+✅ Info: #2196F3
+
+## 5. Dark Mode Palette (optional for later)
+
+Backgrounds:
+  - #111217
+  - #1A1B21
+
+Panels:
+  - #1E2027
+  - #252730
+
+Text:
+  - #F2F3F7
+  - #BFC2CC

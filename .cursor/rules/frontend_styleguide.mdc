@@ -1,0 +1,77 @@
+---
+alwaysApply: true
+description: Defines the Flextide design system including typography, UI element styling, layout principles, and Tailwind CSS configuration. Ensures consistent visual design across all frontend components.
+---
+
+# Flextide Design System / Styleguide Overview
+
+## Typography
+
+Font family: "Inter", sans-serif (modern, legible UI font)
+Headings: semi-bold, uppercase, primary blue (#3B3B4D)
+Body text: regular weight, neutral dark (#121417)
+Callouts / labels: medium weight, secondary teal (#3BCBB8) or primary accent (#5667FF)
+
+## UI Elements
+
+  - Buttons: solid primary blue background (#3B3B4D), white text, primary accent hover (#5667FF)
+  - Focus indicators: glowing outline in primary accent #5667FF
+  - Panels: white background with neutral border (#E2E4E9) and subtle shadow
+  - Inputs: white background with medium neutral border, highlight border on focus (primary accent)
+  - Icons: primary accent or secondary colors depending on state
+  - Alerts: background colored according to semantic colors (success, warning, error, info) with white text
+
+## Layout
+
+  - Clean whitespace and consistent padding (16px base)
+  - Use neutral backgrounds to reduce eye strain
+  - Use semantic colors sparingly for user feedback
+
+## Colors
+
+For colors see .cursor/rules/frontend_colors.mdc file.
+
+## Tailwind CSS Configuration Snippet (colors section)
+
+```js
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        flextide: {
+          primary: '#3B3B4D',
+          primaryAccent: '#5667FF',
+          secondaryTeal: '#3BCBB8',
+          secondaryPurple: '#7A6FF0',
+          neutralLightBg: '#F7F8FA',
+          neutralPanelBg: '#FFFFFF',
+          neutralBorder: '#E2E4E9',
+          neutralTextDark: '#121417',
+          neutralTextMedium: '#555A62',
+          success: '#1DBF73',
+          warning: '#FFB74D',
+          error: '#E53935',
+          info: '#2196F3',
+          darkBg1: '#111217',
+          darkBg2: '#1A1B21',
+          darkPanel1: '#1E2027',
+          darkPanel2: '#252730',
+          darkText1: '#F2F3F7',
+          darkText2: '#BFC2CC',
+        },
+      },
+    },
+  },
+}
+```
+
+## Color Variants for Node Types
+
+| Node Type            | Color                      | Usage Description                               |
+| -------------------- | -------------------------- | ----------------------------------------------- |
+| Data Nodes           | #3BCBB8 (Secondary Teal)   | Indicates data-related processing nodes         |
+| AI Nodes             | #7A6FF0 (Secondary Purple) | Represents AI or ML-related nodes               |
+| Success States       | #1DBF73                    | Nodes or steps completing successfully          |
+| Warning / Caution    | #FFB74D                    | Nodes with warnings or requiring attention      |
+| Error States         | #E53935                    | Error or failed nodes                           |
+| Info / Neutral State | #2196F3                    | Informational statuses or neutral process steps |

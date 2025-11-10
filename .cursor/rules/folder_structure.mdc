@@ -1,0 +1,26 @@
+---
+alwaysApply: false
+description: Defines the project folder structure and organization for Rust crates, binaries, and Next.js frontend. Maintains consistent directory layout across the codebase.
+---
+# Folder Structure Rules (Rust + Next.js)
+
+Root:
+- Cargo workspace root
+- frontend folder for UI
+- migrations folder for sqlx
+
+/crates
+  /core
+  /api
+  /worker
+  /sdk
+  /node_registry
+
+/bin
+  api.rs
+  worker.rs
+
+/frontend
+  /editor
+  /marketplace
+  /nodes

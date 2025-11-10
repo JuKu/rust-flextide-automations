@@ -1,0 +1,27 @@
+---
+title: UI Editor Rules
+description: Enforces React Flow editor UI conventions including node pin placement, connection validation, and graph export format. Ensures consistent visual structure across all nodes.
+---
+
+# UI Editor Rules – React Flow Blueprint System
+
+Editor uses React Flow with custom node renderer (GenericNode).
+
+Rules:
+- Inputs appear on the left side.
+- Outputs appear on the right side.
+- Exec-In on top.
+- Exec-Out on bottom.
+- Config pins also bottom.
+- Nodes must never render random HTML; use consistent structure.
+
+Connection Validation:
+- Only allow connections where pin types match.
+- Exec → Exec only.
+- Data pins must match allowed types (see node_system.mdc).
+
+Graph Export:
+- Editor exports workflow JSON matching Core schema.
+- Node position stored as x/y.
+- Edge IDs encoded as `${nodeId}:${pinId}`.
+- Nodes can have configuration and authentication data (e.q. credentialID), which have to be stored too.

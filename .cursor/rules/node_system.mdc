@@ -1,0 +1,67 @@
+---
+title: Node System Rules
+description: Defines the Node ABI specification, pin types, and execution pipeline for JS/TS and WASM nodes. All nodes must conform to this ABI for compatibility and security.
+---
+
+# Node System Rules – ABI, Pins, JS/TS, WASM
+
+Every Node has:
+- Inputs (left)
+- Outputs (right)
+- Exec-In (top, required)
+- Exec-Out (bottom, required)
+- Optional Config Pins (bottom section)
+
+Pin Types:
+- exec
+- string
+- number
+- boolean
+- json
+- any
+
+Node ABI (Rust Core struct):
+
+```rust
+pub struct NodeSpec {
+  pub id: String,
+  pub label: String,
+  pub version: String,
+  pub kind: NodeKind,    // js, ts, wasm, builtin
+  pub inputs: Vec<PinSpec>,
+  pub outputs: Vec<PinSpec>,
+  pub config: Vec<PinSpec>,
+  pub code: Option<String>,
+  pub wasm_path: Option<String>,
+}
+```
+
+JS/TS Node Execution Pipeline:
+1. User uploads TS or JS
+2. API runs esbuild/swc → outputs bundle.js
+3. bundle.js stored in S3 / Minio / database
+4. Worker loads and runs in QuickJS sandbox:
+  * Input via JSON
+  * Output must be JSON
+
+WASM Nodes:
+  - Compiled with wasm32-wasi
+  - Executed inside Wasmtime
+  - ABI: JSON via stdin/stdout
+
+All nodes follow the same execution signature:
+```
+{
+  "input": {...},
+  "config": {...}
+}
+```
+
+Output must be:
+```
+{
+  "output": {...}
+}
+```
+
+No Node may break ABI.

@@ -1,0 +1,35 @@
+---
+title: Node Marketplace Rules
+description: Defines the structure, validation, and security requirements for Node Packs in the marketplace. Includes pack format, API endpoints, and security policies.
+---
+
+# Node Marketplace Rules
+
+Node Packs are zip files:
+
+mypack-1.0.0.zip
+  /pack.json
+  /nodes/
+      /nodeName/
+         index.js or index.ts or node.wasm
+         schema.json
+         manifest.json
+  /icons/
+  /docs/
+
+Marketplace API:
+- POST /marketplace/packs/upload
+- POST /marketplace/packs/publish
+- GET /marketplace/packs
+- GET /marketplace/packs/:id
+- POST /install/:packId
+
+Security:
+- All Packs are validated before storage.
+- Node files must declare NodeSpec in manifest.
+- No JS Node may use eval, fetch, or imports unless allowed.
+- WASM Nodes must declare required capabilities.
+
+Pricing:
+- Node Pack authors can sell packs.
+- Billing via Stripe or other payment providers.

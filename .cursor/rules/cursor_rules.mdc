@@ -1,0 +1,29 @@
+---
+alwaysApply: true
+description: Core project rules for the workflow automation platform. Defines general principles, security requirements, and cross-cutting concerns that apply to all code changes.
+---
+
+# Cursor Project Rules – Workflow Automation Platform (Rust + Next.js)
+
+This project implements a modular n8n-like workflow automation platform with:
+- Rust backend (API + Worker)
+- Rust Core (workflow engine)
+- JS/TS + WASM Node execution system
+- Next.js Admin UI with React Flow Blueprint Editor
+- Node Marketplace with Packs
+
+General rules:
+- Always follow the architecture defined in `architecture.mdc`.
+- Never merge concerns between API, Worker, Core, or SDK.
+- Always preserve strict typing across Rust and TypeScript.
+- Every Node must follow the Node ABI defined in `node_system.mdc`.
+- Every code change must keep the platform modular, sandboxed, and secure.
+- JS/TS code for nodes must always be compiled through the Node Build Pipeline.
+- WASM nodes must be built via Rust target `wasm32-wasi`.
+- Graph Editor must follow the UI and pin rules in `ui_editor.mdc`.
+- Frontend package management: Always use `pnpm` instead of `npm` for all frontend operations.
+
+Security:
+- Worker must sandbox JS using QuickJS runtime.
+- Worker must sandbox WASM using Wasmtime with capability restrictions.
+- API must validate any uploaded Node Pack before storing.

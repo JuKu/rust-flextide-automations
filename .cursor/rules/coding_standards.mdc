@@ -1,0 +1,32 @@
+---
+title: Coding Standards
+description: Enforces coding standards and conventions for Rust backend and TypeScript/React/Next.js frontend. Includes async patterns, error handling, testing, and commit style guidelines.
+---
+
+# Coding Standards (Rust + TS/React/Next.js)
+
+## Rust
+- Use `tokio` for async.
+- Use `anyhow`, `thiserror` for errors.
+- Use `sqlx` for DB with compile-time checks.
+- All crates must expose clean modules, no circular deps.
+- Workers must never panic during node execution.
+- All Node ABI structs must derive `Serialize` + `Deserialize`.
+
+## Next.js + React
+- Use React Flow for editor.
+- Use Server Actions for backend calls.
+- Use TypeScript everywhere.
+- Editor nodes must use the GenericNode component structure.
+
+## Commit Style
+- Conventional Commits:
+  - feat:
+  - fix:
+  - refactor:
+  - chore:
+  - docs:
+
+## Tests
+- Rust: unit tests inside each crate/tests
+- Next.js: Playwright for editor, Jest for utils

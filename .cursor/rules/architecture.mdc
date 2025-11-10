@@ -1,0 +1,38 @@
+---
+alwaysApply: false
+description: Specifies the system architecture, module boundaries, and execution model. Defines how API, Worker, Core, and UI components interact and maintain separation of concerns.
+---
+# Architecture Specification – Workflow Automation Platform
+
+The system has a vertical architecture with Rust workspace modules:
+
+/crates
+  /core           → Shared logic (workflow model, ABI, schema validation)
+  /api            → HTTP API (Axum), auth, CRUD, marketplace, build pipeline
+  /worker         → Execution engine (JS runtime, WASM runtime, scheduler)
+  /sdk            → Rust SDK for creating WASM nodes
+  /node_registry  → Node metadata loader, marketplace integration
+
+/bin
+  api.rs          → Starts API server
+  worker.rs       → Starts execution worker
+
+/nextjs-app       → Admin UI (Next.js 15), React Flow editor, marketplace UI
+
+Key architecture principles:
+- Core has zero dependencies on API/Worker/UI.
+- Worker only depends on Core + Registry.
+- API never executes any node logic.
+- All node execution happens in Worker sandbox.
+- Node Marketplace stores Packs in S3/Minio.
+- Next.js UI loads nodes dynamically from Registry API.
+- Graph Editor outputs standardized workflow JSON.
+
+Execution Model:
+- Worker loads workflow → resolves node graph → executes node by node
+- Node execution chosen by type:
+  - JS/TS → QuickJS sandbox
+  - WASM → Wasmtime sandbox
+  - Built-in Rust nodes → direct execution
+
+Workflow JSON Schema defined in `node_system.mdc`.
