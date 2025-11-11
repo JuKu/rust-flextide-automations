@@ -98,23 +98,41 @@ export function CustomNode({ data, selected }: CustomNodeProps) {
         style={{ top: "80%" }}
       />
 
-      {/* Bottom handles (3 pins) */}
+      {/* Bottom handles (3 pins) - both source and target for configuration pins */}
       <Handle
         type="source"
         position={Position.Bottom}
-        id="bottom-1"
+        id="bottom-1-source"
+        style={{ left: "25%" }}
+      />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="bottom-1-target"
         style={{ left: "25%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        id="bottom-2"
+        id="bottom-2-source"
+        style={{ left: "50%" }}
+      />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="bottom-2-target"
         style={{ left: "50%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        id="bottom-3"
+        id="bottom-3-source"
+        style={{ left: "75%" }}
+      />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="bottom-3-target"
         style={{ left: "75%" }}
       />
     </div>
