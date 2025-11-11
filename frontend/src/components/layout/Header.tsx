@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
-import { removeToken, getTokenPayload } from "@/lib/auth";
+import { removeToken, getTokenPayload, isServerAdmin, isAuthenticated } from "@/lib/auth";
+import { getCurrentOrganizationUuid, setCurrentOrganizationUuid } from "@/lib/organization";
 import { useTheme } from "@/components/common/ThemeProvider";
 
 function getLicenseColorClass(license: string): string {
@@ -80,28 +81,47 @@ export function Header() {
     }
   }, []);
 
-  // Fetch organizations on mount
+  // Fetch organizations on mount and manage organization selection
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
+
+    // Only fetch organizations if user is authenticated
+    if (!isAuthenticated()) {
+      setLoadingOrgs(false);
+      return;
+    }
 
     async function fetchOrganizations() {
       try {
         const orgs = await listOwnOrganizations();
         setOrganizations(orgs);
-        // Set first organization as current by default
-        if (orgs.length > 0) {
+        
+        // Get current organization from sessionStorage or set first one
+        const savedOrgUuid = getCurrentOrganizationUuid();
+        if (savedOrgUuid && orgs.some(org => org.uuid === savedOrgUuid)) {
+          // Use saved organization if it exists in the list
+          setCurrentOrgUuid(savedOrgUuid);
+          setCurrentOrganizationUuid(savedOrgUuid);
+        } else if (orgs.length > 0) {
+          // Set first organization as current by default
           setCurrentOrgUuid(orgs[0].uuid);
+          setCurrentOrganizationUuid(orgs[0].uuid);
         }
       } catch (error) {
         console.error("Failed to fetch organizations:", error);
+        // If authentication fails, clear token and redirect to login
+        if (error instanceof Error && error.message.includes('Authentication failed')) {
+          removeToken();
+          router.push('/login');
+        }
       } finally {
         setLoadingOrgs(false);
       }
     }
 
     fetchOrganizations();
-  }, []);
+  }, [router]);
 
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
@@ -348,6 +368,7 @@ export function Header() {
                     key={org.uuid}
                     onClick={() => {
                       setCurrentOrgUuid(org.uuid);
+                      setCurrentOrganizationUuid(org.uuid);
                       setOrgMenuOpen(false);
                       // TODO: In production, switch organization via API
                     }}
@@ -392,6 +413,15 @@ export function Header() {
                 >
                   Profile Settings
                 </Link>
+                {isServerAdmin() && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setProfileMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg transition-colors"
+                  >
+                    Server Admin
+                  </Link>
+                )}
                 <button
                   onClick={() => {
                     setProfileMenuOpen(false);

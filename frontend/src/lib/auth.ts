@@ -59,7 +59,7 @@ export function isAuthenticated(): boolean {
 /**
  * Get token payload (decoded JWT)
  */
-export function getTokenPayload(): { sub: string; user_uuid: string; exp: number; iat: number } | null {
+export function getTokenPayload(): { sub: string; user_uuid: string; exp: number; iat: number; is_server_admin: boolean } | null {
   const token = getToken();
   if (!token) {
     return null;
@@ -71,6 +71,14 @@ export function getTokenPayload(): { sub: string; user_uuid: string; exp: number
   } catch {
     return null;
   }
+}
+
+/**
+ * Check if user is server admin
+ */
+export function isServerAdmin(): boolean {
+  const payload = getTokenPayload();
+  return payload?.is_server_admin === true;
 }
 
 /**

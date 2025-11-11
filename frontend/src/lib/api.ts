@@ -3,6 +3,7 @@
  */
 
 import { getToken } from './auth';
+import { getCurrentOrganizationUuid } from './organization';
 
 /**
  * Get the API base URL from environment variable
@@ -44,6 +45,37 @@ export function getApiEndpoint(path: string): string {
   const baseUrl = getApiBaseUrl().replace(/\/$/, '');
   const endpoint = path.startsWith('/') ? path : `/${path}`;
   return `${baseUrl}${endpoint}`;
+}
+
+/**
+ * Get headers for API requests (includes auth token and organization UUID)
+ * Excludes organization UUID for login and register endpoints
+ */
+function getApiHeaders(path: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Add organization UUID header for all requests except login, register, logout, and organizations/list-own
+  const isAuthEndpoint = path === '/api/login' || path === '/api/register';
+  const isLogoutEndpoint = path === '/api/logout';
+  const isOrgListEndpoint = path === '/api/organizations/list-own';
+  
+  if (!isAuthEndpoint && !isLogoutEndpoint && !isOrgListEndpoint) {
+    const orgUuid = getCurrentOrganizationUuid();
+    if (!orgUuid) {
+      console.warn(`[API] Missing organization UUID for request to ${path}. Organization may not be selected yet.`);
+    } else {
+      headers['X-Organization-UUID'] = orgUuid;
+    }
+  }
+
+  return headers;
 }
 
 /**
@@ -143,13 +175,9 @@ export async function register(credentials: RegisterRequest): Promise<AuthRespon
  */
 export async function logout(userUUID: string): Promise<void> {
   try {
-    const token = getToken();
     await fetch(getApiEndpoint('/api/logout'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
+      headers: getApiHeaders('/api/logout'),
       body: JSON.stringify({ user_uuid: userUUID }),
     });
   } catch (error) {
@@ -170,16 +198,23 @@ export interface Organization {
  */
 export async function listOwnOrganizations(): Promise<Organization[]> {
   try {
-    const token = getToken();
+    const headers = getApiHeaders('/api/organizations/list-own');
+    
+    // Ensure we have a token before making the request
+    if (!headers['Authorization']) {
+      throw new Error('Not authenticated. Please log in again.');
+    }
+
     const response = await fetch(getApiEndpoint('/api/organizations/list-own'), {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
+      headers,
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Authentication failed. Please log in again.');
+      }
       throw new Error('Failed to fetch organizations');
     }
 
@@ -208,15 +243,11 @@ export async function editWorkflowTitle(
   title: string
 ): Promise<EditWorkflowTitleResponse> {
   try {
-    const token = getToken();
     const response = await fetch(
       getApiEndpoint(`/api/workflows/${workflowUUID}/edit-title`),
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        headers: getApiHeaders(`/api/workflows/${workflowUUID}/edit-title`),
         body: JSON.stringify({ title }),
       }
     );

@@ -1,12 +1,13 @@
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::Json,
+    extract::{Path, Request, State},
+    http::{header, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tower::ServiceBuilder;
@@ -20,12 +21,13 @@ pub struct AppState {
     pub jwt_secret: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String, // email
     pub user_uuid: String, // user UUID
     pub exp: usize,
     pub iat: usize,
+    pub is_server_admin: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +41,228 @@ pub struct RegisterRequest {
     pub email: String,
     #[allow(dead_code)] // Will be used when implementing proper registration
     pub password: String,
+}
+
+/// Helper function to create error response with CORS headers
+fn error_response(status: StatusCode, error: Value) -> Response {
+    let mut response = Json(error).into_response();
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        header::HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        header::HeaderValue::from_static("*"),
+    );
+    response
+}
+
+/// Authentication middleware - validates JWT token
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let method = request.method().clone();
+
+    // Skip auth for OPTIONS requests (CORS preflight)
+    if method == axum::http::Method::OPTIONS {
+        tracing::debug!("[Auth] Skipping authentication for OPTIONS request to {}", path);
+        return next.run(request).await;
+    }
+
+    // Skip auth for login and register endpoints
+    if path == "/api/login" || path == "/api/register" || path == "/api/health" {
+        tracing::debug!("[Auth] Skipping authentication for endpoint: {}", path);
+        return next.run(request).await;
+    }
+
+    tracing::info!("[Auth] Authenticating request: {} {}", method, path);
+
+    // Extract token from Authorization header
+    let headers = request.headers();
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok());
+
+    let token = match auth_header {
+        Some(header) => {
+            match header.strip_prefix("Bearer ") {
+                Some(t) => {
+                    tracing::debug!("[Auth] Token found in Authorization header");
+                    t
+                }
+                None => {
+                    tracing::warn!("[Auth] Invalid Authorization header format for {} {}", method, path);
+                    return error_response(
+                        StatusCode::UNAUTHORIZED,
+                        json!({ "error": "Invalid Authorization header format" }),
+                    );
+                }
+            }
+        }
+        None => {
+            tracing::warn!("[Auth] Missing Authorization header for {} {}", method, path);
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "Missing Authorization header" }),
+            );
+        }
+    };
+
+    // Decode and validate token
+    let token_data = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(state.jwt_secret.as_ref()),
+        &Validation::default(),
+    ) {
+        Ok(data) => {
+            tracing::debug!("[Auth] Token decoded successfully for user: {}", data.claims.sub);
+            data
+        }
+        Err(e) => {
+            tracing::warn!("[Auth] Token decode failed for {} {}: {:?}", method, path, e);
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "Invalid or expired token" }),
+            );
+        }
+    };
+
+    // Check if token is expired
+    let now = Utc::now().timestamp() as usize;
+    if token_data.claims.exp < now {
+        tracing::warn!(
+            "[Auth] Token expired for user {} (exp: {}, now: {})",
+            token_data.claims.sub,
+            token_data.claims.exp,
+            now
+        );
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            json!({ "error": "Token expired" }),
+        );
+    }
+
+    // Attach claims to request extensions for use in handlers
+    request.extensions_mut().insert(token_data.claims.clone());
+    tracing::info!(
+        "[Auth] Authentication successful for user {} (is_server_admin: {})",
+        token_data.claims.sub,
+        token_data.claims.is_server_admin
+    );
+
+    next.run(request).await
+}
+
+/// Organization check middleware - validates user belongs to organization
+pub async fn organization_middleware(
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let method = request.method().clone();
+
+    // Skip for OPTIONS requests (CORS preflight)
+    if method == axum::http::Method::OPTIONS {
+        tracing::debug!("[Org] Skipping organization check for OPTIONS request to {}", path);
+        return next.run(request).await;
+    }
+
+    // Skip for login, register, health, logout, and organizations/list-own endpoints
+    if path == "/api/login"
+        || path == "/api/register"
+        || path == "/api/health"
+        || path == "/api/logout"
+        || path == "/api/organizations/list-own"
+    {
+        tracing::debug!("[Org] Skipping organization check for endpoint: {}", path);
+        return next.run(request).await;
+    }
+
+    tracing::info!("[Org] Checking organization for request: {} {}", method, path);
+
+    // Extract organization UUID from header
+    let headers = request.headers();
+    let org_uuid = match headers.get("X-Organization-UUID") {
+        Some(header) => {
+            match header.to_str() {
+                Ok(uuid) => {
+                    tracing::debug!("[Org] Organization UUID found in header: {}", uuid);
+                    uuid
+                }
+                Err(e) => {
+                    tracing::warn!("[Org] Invalid X-Organization-UUID header format for {} {}: {:?}", method, path, e);
+                    return error_response(
+                        StatusCode::BAD_REQUEST,
+                        json!({ "error": "Invalid X-Organization-UUID header" }),
+                    );
+                }
+            }
+        }
+        None => {
+            tracing::warn!("[Org] Missing X-Organization-UUID header for {} {}", method, path);
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                json!({ 
+                    "error": "Missing X-Organization-UUID header",
+                    "code": "MISSING_ORG_UUID"
+                }),
+            );
+        }
+    };
+
+    // Get user claims from request extensions (set by auth_middleware)
+    let claims = match request.extensions().get::<Claims>() {
+        Some(c) => {
+            tracing::debug!("[Org] User claims found: user={}, is_server_admin={}", c.sub, c.is_server_admin);
+            c
+        }
+        None => {
+            tracing::error!("[Org] User not authenticated (claims missing) for {} {}", method, path);
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "User not authenticated" }),
+            );
+        }
+    };
+
+    // Extract organization UUID before mutable borrow
+    let org_uuid_string = org_uuid.to_string();
+
+    // TODO: Check if user belongs to organization (database query)
+    // For now, assume user belongs to organization
+    // In production, query database to verify user membership
+    let user_belongs_to_org = true; // Placeholder
+
+    if !user_belongs_to_org {
+        tracing::warn!(
+            "[Org] User {} does not belong to organization {}",
+            claims.sub,
+            org_uuid_string
+        );
+        return error_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "User does not belong to this organization" }),
+        );
+    }
+
+    tracing::info!(
+        "[Org] Organization check passed: user {} -> org {}",
+        claims.sub,
+        org_uuid_string
+    );
+
+    // Attach organization UUID to request extensions
+    request.extensions_mut().insert(org_uuid_string);
+
+    next.run(request).await
 }
 
 /// Create the API router with all routes
@@ -100,8 +324,16 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .layer(
             ServiceBuilder::new()
-                .layer(trace_layer)
                 .layer(cors)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    organization_middleware,
+                ))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    auth_middleware,
+                ))
+                .layer(trace_layer)
         )
         .with_state(state)
 }
@@ -131,11 +363,15 @@ pub async fn login(
     // For now, use a deterministic UUID based on email hash
     let user_uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, payload.email.as_bytes()).to_string();
 
+    // Set server admin status (admin@example.com is server admin)
+    let is_server_admin = payload.email == "admin@example.com";
+
     let claims = Claims {
         sub: payload.email.clone(),
         user_uuid: user_uuid.clone(),
         exp,
         iat,
+        is_server_admin,
     };
 
     let token = encode(
@@ -176,11 +412,15 @@ pub async fn register(
     // For now, use a deterministic UUID based on email hash
     let user_uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, payload.email.as_bytes()).to_string();
 
+    // Set server admin status (admin@example.com is server admin)
+    let is_server_admin = payload.email == "admin@example.com";
+
     let claims = Claims {
         sub: payload.email.clone(),
         user_uuid: user_uuid.clone(),
         exp,
         iat,
+        is_server_admin,
     };
 
     let token = encode(
