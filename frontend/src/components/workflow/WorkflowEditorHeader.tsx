@@ -1,21 +1,102 @@
 "use client";
 
+import { useState, useRef } from "react";
+
 interface WorkflowEditorHeaderProps {
   workflowId: string;
 }
 
 export function WorkflowEditorHeader({ workflowId }: WorkflowEditorHeaderProps) {
-  const workflowTitle = "Workflow 100000000 - Not Saved";
+  // workflowId will be used for saving workflow changes in the future
+  void workflowId;
+  const [workflowTitle, setWorkflowTitle] = useState("Workflow 100000000 - Not Saved");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const workflowVersion = "Version 1001";
+
+  const handleTitleSave = (newTitle: string) => {
+    if (newTitle.trim().length > 0 && newTitle.length <= 50) {
+      setWorkflowTitle(newTitle);
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      handleTitleSave(e.currentTarget.value);
+    } else if (e.key === "Escape") {
+      setIsEditingTitle(false);
+    }
+  };
+
+  const handleSaveClick = () => {
+    if (titleInputRef.current) {
+      handleTitleSave(titleInputRef.current.value);
+    }
+  };
 
   return (
     <div className="border-b border-flextide-neutral-border bg-flextide-neutral-panel-bg px-6 py-3">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 flex-1 min-w-0">
           {/* Workflow Title */}
-          <h1 className="text-lg font-semibold text-flextide-neutral-text-dark truncate">
-            {workflowTitle}
-          </h1>
+          {isEditingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                ref={titleInputRef}
+                type="text"
+                defaultValue={workflowTitle}
+                maxLength={50}
+                autoFocus
+                onKeyDown={handleTitleKeyDown}
+                className="text-lg font-semibold text-flextide-neutral-text-dark px-2 py-1 border border-flextide-primary-accent rounded-md bg-flextide-neutral-panel-bg focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent min-w-0"
+              />
+              <button
+                onClick={handleSaveClick}
+                className="p-1 rounded-md text-flextide-primary hover:bg-flextide-neutral-light-bg transition-colors flex-shrink-0"
+                title="Save workflow title"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-flextide-neutral-text-dark truncate">
+                {workflowTitle}
+              </h1>
+              <button
+                onClick={() => setIsEditingTitle(true)}
+                className="p-1 rounded-md text-flextide-neutral-text-medium hover:bg-flextide-neutral-light-bg transition-colors flex-shrink-0"
+                title="Edit workflow title"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
 
           {/* Check Workflow Button */}
           <button
@@ -68,6 +149,26 @@ export function WorkflowEditorHeader({ workflowId }: WorkflowEditorHeaderProps) 
                   strokeLinejoin="round"
                   strokeWidth={2}
                   d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                />
+              </svg>
+            </button>
+
+            {/* Service Button */}
+            <button
+              className="p-2 rounded-md text-flextide-neutral-text-medium hover:bg-flextide-neutral-light-bg transition-colors"
+              title="Service"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
                 />
               </svg>
             </button>
