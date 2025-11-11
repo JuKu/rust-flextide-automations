@@ -11,11 +11,11 @@ import ReactFlow, {
   addEdge,
   useNodesState,
   useEdgesState,
-  NodeTypes,
   ReactFlowInstance,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import "./workflow-editor.css";
+import { NodeContextMenu } from "./NodeContextMenu";
 
 interface WorkflowCanvasProps {
   workflowId: string;
@@ -73,14 +73,25 @@ const nodeLabelMap: Record<string, string> = {
 };
 
 export function WorkflowCanvas({
-  workflowId,
+  workflowId: _workflowId,
   onNodeSelect,
   selectedNodeId,
 }: WorkflowCanvasProps) {
+  // workflowId will be used for saving workflow state in the future
+  void _workflowId;
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean;
+    position: { x: number; y: number };
+    nodeId: string | null;
+  }>({
+    isOpen: false,
+    position: { x: 0, y: 0 },
+    nodeId: null,
+  });
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -96,8 +107,21 @@ export function WorkflowCanvas({
     [onNodeSelect]
   );
 
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      event.preventDefault();
+      setContextMenu({
+        isOpen: true,
+        position: { x: event.clientX, y: event.clientY },
+        nodeId: node.id,
+      });
+    },
+    []
+  );
+
   const onPaneClick = useCallback(() => {
     onNodeSelect(null);
+    setContextMenu({ isOpen: false, position: { x: 0, y: 0 }, nodeId: null });
   }, [onNodeSelect]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -146,6 +170,36 @@ export function WorkflowCanvas({
     setReactFlowInstance(instance);
   }, []);
 
+  const handleDeleteNode = useCallback(() => {
+    if (contextMenu.nodeId) {
+      setNodes((nds) => nds.filter((node) => node.id !== contextMenu.nodeId));
+      setEdges((eds) =>
+        eds.filter(
+          (edge) =>
+            edge.source !== contextMenu.nodeId &&
+            edge.target !== contextMenu.nodeId
+        )
+      );
+      if (selectedNodeId === contextMenu.nodeId) {
+        onNodeSelect(null);
+      }
+    }
+  }, [contextMenu.nodeId, setNodes, setEdges, selectedNodeId, onNodeSelect]);
+
+  const handleConfigure = useCallback(() => {
+    if (contextMenu.nodeId) {
+      // TODO: Open configuration modal/dialog
+      console.log("Configure node:", contextMenu.nodeId);
+    }
+  }, [contextMenu.nodeId]);
+
+  const handleDocumentation = useCallback(() => {
+    if (contextMenu.nodeId) {
+      // TODO: Open documentation
+      console.log("Show documentation for node:", contextMenu.nodeId);
+    }
+  }, [contextMenu.nodeId]);
+
   // Update node selection styling
   const nodesWithSelection = useMemo(() => {
     return nodes.map((node) => ({
@@ -163,6 +217,7 @@ export function WorkflowCanvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -182,6 +237,18 @@ export function WorkflowCanvas({
           className="bg-flextide-neutral-panel-bg border border-flextide-neutral-border rounded-md"
         />
       </ReactFlow>
+
+      {/* Context Menu */}
+      <NodeContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.position}
+        onClose={() =>
+          setContextMenu({ isOpen: false, position: { x: 0, y: 0 }, nodeId: null })
+        }
+        onConfigure={handleConfigure}
+        onDocumentation={handleDocumentation}
+        onDelete={handleDeleteNode}
+      />
     </div>
   );
 }
