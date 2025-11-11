@@ -30,19 +30,19 @@ const initialNodes: Node[] = [
     id: "1",
     type: "custom",
     position: { x: 250, y: 100 },
-    data: { label: "Webhook Trigger" },
+    data: { label: "Webhook Trigger", nodeType: "trigger" },
   },
   {
     id: "2",
     type: "custom",
     position: { x: 500, y: 100 },
-    data: { label: "HTTP Request" },
+    data: { label: "HTTP Request", nodeType: "data" },
   },
   {
     id: "3",
     type: "custom",
     position: { x: 750, y: 100 },
-    data: { label: "Set Data" },
+    data: { label: "Set Data", nodeType: "data" },
   },
 ];
 
@@ -72,6 +72,34 @@ const nodeLabelMap: Record<string, string> = {
   postgres: "PostgreSQL",
   mongodb: "MongoDB",
 };
+
+// Map node IDs to their categories/types for colorization
+const nodeTypeMap: Record<string, string> = {
+  // Start/Trigger nodes
+  webhook: "trigger",
+  cron: "trigger",
+  "manual": "trigger",
+  // Standard/Data processing nodes
+  http: "data",
+  json: "data",
+  set: "data",
+  if: "data",
+  switch: "data",
+  // Flow control nodes
+  merge: "flow",
+  split: "flow",
+  wait: "flow",
+  loop: "flow",
+  // File nodes
+  "read-file": "file",
+  "write-file": "file",
+  "delete-file": "file",
+  // Database nodes
+  mysql: "database",
+  postgres: "database",
+  mongodb: "database",
+};
+
 
 export function WorkflowCanvas({
   workflowId: _workflowId,
@@ -134,10 +162,10 @@ export function WorkflowCanvas({
     (event: React.DragEvent) => {
       event.preventDefault();
 
-      const nodeType = event.dataTransfer.getData("application/reactflow");
+      const nodeTypeId = event.dataTransfer.getData("application/reactflow");
 
       // Check if the dropped element is a node type
-      if (!nodeType || !nodeLabelMap[nodeType]) {
+      if (!nodeTypeId || !nodeLabelMap[nodeTypeId]) {
         return;
       }
 
@@ -153,13 +181,18 @@ export function WorkflowCanvas({
       });
 
       // Generate a unique ID for the new node
-      const newNodeId = `${nodeType}-${Date.now()}`;
+      const newNodeId = `${nodeTypeId}-${Date.now()}`;
 
+      // Map node type ID to category
+      const nodeCategory = nodeTypeMap[nodeTypeId] || "default";
       const newNode: Node = {
         id: newNodeId,
         type: "custom",
         position,
-        data: { label: nodeLabelMap[nodeType] },
+        data: {
+          label: nodeLabelMap[nodeTypeId],
+          nodeType: nodeCategory,
+        },
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -227,6 +260,9 @@ export function WorkflowCanvas({
         className="bg-flextide-neutral-light-bg"
         nodeTypes={{
           custom: CustomNode,
+        }}
+        defaultEdgeOptions={{
+          style: { strokeWidth: 2 },
         }}
       >
         <Background color="#E2E4E9" gap={16} />
