@@ -52,7 +52,16 @@ export function Header() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [currentOrgUuid, setCurrentOrgUuid] = useState<string | null>(null);
   const [loadingOrgs, setLoadingOrgs] = useState(true);
+  const [userInitial, setUserInitial] = useState<string>("U");
   const initializedRef = useRef(false);
+
+  // Get user initial on client side only
+  useEffect(() => {
+    const payload = getTokenPayload();
+    if (payload?.sub) {
+      setUserInitial(payload.sub.charAt(0).toUpperCase());
+    }
+  }, []);
 
   // Fetch organizations on mount
   useEffect(() => {
@@ -310,7 +319,7 @@ export function Header() {
               onClick={() => setProfileMenuOpen(!profileMenuOpen)}
               className="flex items-center justify-center w-10 h-10 rounded-full bg-flextide-primary text-white font-semibold hover:bg-flextide-primary-accent transition-colors focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent focus:ring-offset-2"
             >
-              {getTokenPayload()?.sub?.charAt(0).toUpperCase() || "U"}
+              {userInitial}
             </button>
 
             {profileMenuOpen && (
