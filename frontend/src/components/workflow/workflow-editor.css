@@ -25,14 +25,29 @@
 }
 
 .react-flow__handle {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
   background: #3B3B4D;
   border: 2px solid #FFFFFF;
+  border-radius: 50%;
 }
 
 .react-flow__handle:hover {
   background: #5667FF;
+  width: 14px;
+  height: 14px;
+}
+
+.react-flow__handle-connecting {
+  background: #5667FF;
+}
+
+.react-flow__handle-valid {
+  background: #1DBF73;
+}
+
+.react-flow__handle.invalid {
+  background: #E53935;
 }
 
 .react-flow__controls {

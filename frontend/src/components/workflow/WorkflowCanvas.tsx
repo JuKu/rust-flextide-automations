@@ -16,6 +16,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import "./workflow-editor.css";
 import { NodeContextMenu } from "./NodeContextMenu";
+import { CustomNode } from "./CustomNode";
 
 interface WorkflowCanvasProps {
   workflowId: string;
@@ -27,19 +28,19 @@ interface WorkflowCanvasProps {
 const initialNodes: Node[] = [
   {
     id: "1",
-    type: "default",
+    type: "custom",
     position: { x: 250, y: 100 },
     data: { label: "Webhook Trigger" },
   },
   {
     id: "2",
-    type: "default",
+    type: "custom",
     position: { x: 500, y: 100 },
     data: { label: "HTTP Request" },
   },
   {
     id: "3",
-    type: "default",
+    type: "custom",
     position: { x: 750, y: 100 },
     data: { label: "Set Data" },
   },
@@ -156,7 +157,7 @@ export function WorkflowCanvas({
 
       const newNode: Node = {
         id: newNodeId,
-        type: "default",
+        type: "custom",
         position,
         data: { label: nodeLabelMap[nodeType] },
       };
@@ -224,7 +225,9 @@ export function WorkflowCanvas({
         onInit={onInit}
         fitView
         className="bg-flextide-neutral-light-bg"
-        nodeTypes={{}}
+        nodeTypes={{
+          custom: CustomNode,
+        }}
       >
         <Background color="#E2E4E9" gap={16} />
         <Controls className="bg-flextide-neutral-panel-bg border border-flextide-neutral-border rounded-md" />
