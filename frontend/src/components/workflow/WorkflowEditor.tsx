@@ -21,21 +21,45 @@ export function WorkflowEditor({ workflowId }: WorkflowEditorProps) {
       <div className="flex flex-col h-screen overflow-hidden">
         <WorkflowEditorHeader workflowId={workflowId} />
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
           {/* Left: Node Selection Panel */}
           <div
             className={`${
               nodePanelCollapsed ? "w-0" : "w-80"
             } transition-all duration-300 border-r border-flextide-neutral-border bg-flextide-neutral-panel-bg overflow-hidden flex flex-col flex-shrink-0`}
           >
-            <NodeSelectionPanel
-              collapsed={nodePanelCollapsed}
-              onToggleCollapse={() => setNodePanelCollapsed(!nodePanelCollapsed)}
-            />
+            {!nodePanelCollapsed && (
+              <NodeSelectionPanel
+                collapsed={nodePanelCollapsed}
+                onToggleCollapse={() => setNodePanelCollapsed(!nodePanelCollapsed)}
+              />
+            )}
           </div>
 
           {/* Middle: React Flow Canvas */}
-          <div className="flex-1 bg-flextide-neutral-light-bg overflow-hidden min-w-0">
+          <div className="flex-1 bg-flextide-neutral-light-bg overflow-hidden min-w-0 relative">
+            {/* Floating Expand Button (only visible when panel is collapsed) */}
+            {nodePanelCollapsed && (
+              <button
+                onClick={() => setNodePanelCollapsed(false)}
+                className="absolute top-4 left-4 z-10 p-2 bg-flextide-neutral-panel-bg border border-flextide-neutral-border rounded-md shadow-lg hover:bg-flextide-neutral-light-bg transition-colors flex items-center justify-center"
+                title="Expand Node Panel"
+              >
+                <svg
+                  className="w-5 h-5 text-flextide-neutral-text-medium"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            )}
             <WorkflowCanvas
               workflowId={workflowId}
               onNodeSelect={setSelectedNodeId}
