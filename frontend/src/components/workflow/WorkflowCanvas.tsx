@@ -122,6 +122,16 @@ export function WorkflowCanvas({
     nodeId: null,
   });
 
+  const isValidConnection = useCallback((connection: Connection) => {
+    // Allow connections from any handle to any handle
+    // This overrides React Flow's default source->target only restriction
+    if (!connection.source || !connection.target) {
+      return false;
+    }
+    // Allow all connections (source->target, source->source, target->target, target->source)
+    return true;
+  }, []);
+
   const onConnect = useCallback(
     (params: Connection) => {
       setEdges((eds) => addEdge(params, eds));
@@ -250,6 +260,7 @@ export function WorkflowCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
