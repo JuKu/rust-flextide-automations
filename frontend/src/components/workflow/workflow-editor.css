@@ -1,0 +1,45 @@
+/* React Flow Custom Styling */
+.react-flow__node {
+  border: 2px solid #E2E4E9;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #121417;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.react-flow__node.selected {
+  border-color: #5667FF;
+  box-shadow: 0 0 0 3px rgba(86, 103, 255, 0.1);
+}
+
+.react-flow__edge-path {
+  stroke: #3B3B4D;
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #5667FF;
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: #3B3B4D;
+  border: 2px solid #FFFFFF;
+}
+
+.react-flow__handle:hover {
+  background: #5667FF;
+}
+
+.react-flow__controls {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.react-flow__minimap {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+

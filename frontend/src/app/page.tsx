@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AICoworkersSection } from "@/components/home/AICoworkersSection";
 import { WorkflowsSection } from "@/components/home/WorkflowsSection";
@@ -8,13 +9,20 @@ import { WorkflowCreationModal } from "@/components/home/WorkflowCreationModal";
 import { AICoworkerCreationModal } from "@/components/home/AICoworkerCreationModal";
 
 export default function Home() {
+  const router = useRouter();
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showAICoworkerModal, setShowAICoworkerModal] = useState(false);
 
   const handleWorkflowOption = (option: "blank" | "marketplace" | "duplicate") => {
-    console.log("Selected option:", option);
     setShowWorkflowModal(false);
-    // TODO: Handle workflow creation based on option
+    if (option === "blank") {
+      // Generate a new workflow ID (in production, create via API)
+      const newWorkflowId = Date.now().toString();
+      router.push(`/workflows/${newWorkflowId}`);
+    } else {
+      // TODO: Handle marketplace and duplicate options
+      console.log("Selected option:", option);
+    }
   };
 
   const handleAICoworkerOption = (option: "blank" | "marketplace" | "duplicate") => {
