@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { WorkflowQuickActions } from "@/components/common/WorkflowQuickActions";
 import { AICoworkersSection } from "@/components/home/AICoworkersSection";
 import { WorkflowsSection } from "@/components/home/WorkflowsSection";
 import { WorkflowCreationModal } from "@/components/home/WorkflowCreationModal";
@@ -45,25 +46,7 @@ export default function Home() {
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 mb-6">
           {/* Quick Actions */}
-          <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-flextide-neutral-text-dark mb-4">
-              Quick Actions
-            </h2>
-            <div className="space-y-3">
-              <button
-                onClick={() => setShowWorkflowModal(true)}
-                className="w-full px-4 py-2 rounded-md bg-flextide-primary text-white hover:bg-flextide-primary-accent transition-colors"
-              >
-                Create Workflow
-              </button>
-              <a
-                href="/marketplace"
-                className="block px-4 py-2 rounded-md border border-flextide-neutral-border text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg transition-colors text-center"
-              >
-                Browse Marketplace
-              </a>
-            </div>
-          </div>
+          <WorkflowQuickActions onCreateWorkflow={() => setShowWorkflowModal(true)} />
 
           {/* Recent Workflows */}
           <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
