@@ -7,6 +7,21 @@ import { usePathname, useRouter } from "next/navigation";
 import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
 import { removeToken, getTokenPayload } from "@/lib/auth";
 
+function getLicenseColorClass(license: string): string {
+  switch (license) {
+    case "Free":
+      return "text-flextide-neutral-text-medium border-flextide-neutral-text-medium bg-flextide-neutral-light-bg";
+    case "Pro":
+      return "text-flextide-info border-flextide-info bg-flextide-info/10";
+    case "Pro+":
+      return "text-flextide-secondary-purple border-flextide-secondary-purple bg-flextide-secondary-purple/10";
+    case "Team":
+      return "text-flextide-success border-flextide-success bg-flextide-success/10";
+    default:
+      return "text-flextide-neutral-text-medium border-flextide-neutral-text-medium bg-flextide-neutral-light-bg";
+  }
+}
+
 interface MenuItem {
   label: string;
   href: string;
@@ -303,9 +318,14 @@ export function Header() {
                   >
                     <div className="flex items-center justify-between">
                       <span>{org.title}</span>
-                      {org.is_admin && (
-                        <span className="text-xs opacity-75">Admin</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded border ${getLicenseColorClass(org.license)}`}>
+                          {org.license}
+                        </span>
+                        {org.is_admin && (
+                          <span className="text-xs opacity-75">Admin</span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}

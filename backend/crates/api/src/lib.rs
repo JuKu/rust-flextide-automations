@@ -215,11 +215,36 @@ pub async fn logout(
     Ok(Json(json!({ "message": "Logged out successfully" })))
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum License {
+    Free,
+    Pro,
+    #[serde(rename = "Pro+")]
+    ProPlus,
+    Team,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Organization {
     pub uuid: String,
     pub title: String,
     pub is_admin: bool,
+    #[serde(serialize_with = "serialize_license")]
+    pub license: License,
+}
+
+fn serialize_license<S>(license: &License, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let s = match license {
+        License::Free => "Free",
+        License::Pro => "Pro",
+        License::ProPlus => "Pro+",
+        License::Team => "Team",
+    };
+    serializer.serialize_str(s)
 }
 
 pub async fn list_own_organizations(
@@ -231,26 +256,31 @@ pub async fn list_own_organizations(
             uuid: uuid::Uuid::new_v4().to_string(),
             title: "My Organization".to_string(),
             is_admin: true,
+            license: License::ProPlus,
         },
         Organization {
             uuid: uuid::Uuid::new_v4().to_string(),
             title: "Another Org".to_string(),
             is_admin: true,
+            license: License::Team,
         },
         Organization {
             uuid: uuid::Uuid::new_v4().to_string(),
             title: "Test Org".to_string(),
             is_admin: true,
+            license: License::Pro,
         },
         Organization {
             uuid: uuid::Uuid::new_v4().to_string(),
             title: "Test Org 2".to_string(),
             is_admin: false,
+            license: License::Free,
         },
         Organization {
             uuid: uuid::Uuid::new_v4().to_string(),
             title: "Test Org 3".to_string(),
             is_admin: false,
+            license: License::Pro,
         },
     ];
 

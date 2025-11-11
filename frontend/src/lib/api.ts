@@ -162,6 +162,7 @@ export interface Organization {
   uuid: string;
   title: string;
   is_admin: boolean;
+  license: string;
 }
 
 /**

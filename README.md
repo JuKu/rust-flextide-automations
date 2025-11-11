@@ -132,7 +132,28 @@ cd backend
 cargo run --bin worker
 ```
 
-Frontend:
+Frontend:Dashboard
+Workflows
+  - All Workflows
+  - Create Workflow
+AI Employees
+  - All AI Employees
+  - Create AI Employee
+Marketplace
+  - Browse Packs
+  - Installed Packs
+Executions
+  - Recent Executions
+  - Failed Executions
+  - Logs
+Organization
+  - Settings
+  - Billing
+  - Team & Roles
+Profile
+  - My Profile
+  - API Keys
+
 ```shell
 pnpm run dev
 ```
