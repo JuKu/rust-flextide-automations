@@ -14,14 +14,13 @@ interface AICoworker {
 // Mock data - in production, fetch from API
 const mockAICoworkers: AICoworker[] = [];
 
-export function AICoworkersSection() {
+interface AICoworkersSectionProps {
+  onCreateAICoworker: () => void;
+}
+
+export function AICoworkersSection({ onCreateAICoworker }: AICoworkersSectionProps) {
   const [coworkers] = useState<AICoworker[]>(mockAICoworkers);
   const [contextMenuOpen, setContextMenuOpen] = useState<string | null>(null);
-
-  const handleCreateNew = () => {
-    // TODO: Open AI Coworker creation flow
-    console.log("Create new AI Coworker");
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -44,7 +43,7 @@ export function AICoworkersSection() {
           My AI Coworkers
         </h2>
         <button
-          onClick={handleCreateNew}
+          onClick={onCreateAICoworker}
           className="flex items-center justify-center w-8 h-8 rounded-full bg-flextide-primary text-white hover:bg-flextide-primary-accent transition-colors focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent focus:ring-offset-2"
           aria-label="Add new AI Coworker"
         >
@@ -72,7 +71,7 @@ export function AICoworkersSection() {
               You don't have any AI Coworkers yet.
             </p>
             <button
-              onClick={handleCreateNew}
+              onClick={onCreateAICoworker}
               className="text-flextide-primary hover:text-flextide-primary-accent font-medium transition-colors underline"
             >
               Create a new AI Coworker now

@@ -5,14 +5,22 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { AICoworkersSection } from "@/components/home/AICoworkersSection";
 import { WorkflowsSection } from "@/components/home/WorkflowsSection";
 import { WorkflowCreationModal } from "@/components/home/WorkflowCreationModal";
+import { AICoworkerCreationModal } from "@/components/home/AICoworkerCreationModal";
 
 export default function Home() {
-  const [showCreationModal, setShowCreationModal] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showAICoworkerModal, setShowAICoworkerModal] = useState(false);
 
   const handleWorkflowOption = (option: "blank" | "marketplace" | "duplicate") => {
     console.log("Selected option:", option);
-    setShowCreationModal(false);
+    setShowWorkflowModal(false);
     // TODO: Handle workflow creation based on option
+  };
+
+  const handleAICoworkerOption = (option: "blank" | "marketplace" | "duplicate") => {
+    console.log("Selected AI Coworker option:", option);
+    setShowAICoworkerModal(false);
+    // TODO: Handle AI Coworker creation based on option
   };
 
   return (
@@ -35,7 +43,7 @@ export default function Home() {
             </h2>
             <div className="space-y-3">
               <button
-                onClick={() => setShowCreationModal(true)}
+                onClick={() => setShowWorkflowModal(true)}
                 className="w-full px-4 py-2 rounded-md bg-flextide-primary text-white hover:bg-flextide-primary-accent transition-colors"
               >
                 Create Workflow
@@ -72,18 +80,28 @@ export default function Home() {
 
         {/* New Row: AI Coworkers and Workflows */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" style={{ minHeight: "500px" }}>
-          <AICoworkersSection />
+          <AICoworkersSection
+            onCreateAICoworker={() => setShowAICoworkerModal(true)}
+          />
           <WorkflowsSection
-            onCreateWorkflow={() => setShowCreationModal(true)}
+            onCreateWorkflow={() => setShowWorkflowModal(true)}
           />
         </div>
       </div>
 
       {/* Workflow Creation Modal */}
-      {showCreationModal && (
+      {showWorkflowModal && (
         <WorkflowCreationModal
-          onClose={() => setShowCreationModal(false)}
+          onClose={() => setShowWorkflowModal(false)}
           onSelect={handleWorkflowOption}
+        />
+      )}
+
+      {/* AI Coworker Creation Modal */}
+      {showAICoworkerModal && (
+        <AICoworkerCreationModal
+          onClose={() => setShowAICoworkerModal(false)}
+          onSelect={handleAICoworkerOption}
         />
       )}
     </AppLayout>
