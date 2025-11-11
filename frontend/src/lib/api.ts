@@ -143,10 +143,12 @@ export async function register(credentials: RegisterRequest): Promise<AuthRespon
  */
 export async function logout(userUUID: string): Promise<void> {
   try {
+    const token = getToken();
     await fetch(getApiEndpoint('/api/logout'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: JSON.stringify({ user_uuid: userUUID }),
     });
@@ -183,6 +185,53 @@ export async function listOwnOrganizations(): Promise<Organization[]> {
     return response.json();
   } catch (error) {
     console.error('Failed to fetch organizations:', error);
+    throw error;
+  }
+}
+
+export interface EditWorkflowTitleRequest {
+  title: string;
+}
+
+export interface EditWorkflowTitleResponse {
+  message: string;
+  workflow_uuid: string;
+  title: string;
+}
+
+/**
+ * Edit workflow title
+ */
+export async function editWorkflowTitle(
+  workflowUUID: string,
+  title: string
+): Promise<EditWorkflowTitleResponse> {
+  try {
+    const token = getToken();
+    const response = await fetch(
+      getApiEndpoint(`/api/workflows/${workflowUUID}/edit-title`),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify({ title }),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        throw new Error(error.error || 'Failed to update workflow title');
+      } catch {
+        throw new Error('Failed to update workflow title');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Failed to update workflow title:', error);
     throw error;
   }
 }

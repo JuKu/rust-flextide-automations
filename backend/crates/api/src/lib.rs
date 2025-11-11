@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -97,6 +97,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/register", post(register))
         .route("/api/logout", post(logout))
         .route("/api/organizations/list-own", get(list_own_organizations))
+        .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .layer(
             ServiceBuilder::new()
                 .layer(trace_layer)
@@ -254,4 +255,81 @@ pub async fn list_own_organizations(
     ];
 
     Ok(Json(organizations))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EditWorkflowTitleRequest {
+    pub title: String,
+}
+
+pub async fn edit_workflow_title(
+    Path(workflow_uuid): Path<String>,
+    State(_state): State<AppState>,
+    Json(payload): Json<EditWorkflowTitleRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Validate title length
+    if payload.title.trim().is_empty() {
+        tracing::warn!(
+            "Workflow {} title update failed: Title cannot be empty",
+            workflow_uuid
+        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Title cannot be empty" })),
+        ));
+    }
+
+    if payload.title.len() > 50 {
+        tracing::warn!(
+            "Workflow {} title update failed: Title length {} exceeds maximum of 50 characters",
+            workflow_uuid,
+            payload.title.len()
+        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Title cannot exceed 50 characters" })),
+        ));
+    }
+
+    // Validate for invalid characters (control characters, invisible characters)
+    // Check for control characters (except normal whitespace like space, tab, newline)
+    // and invisible Unicode characters
+    if payload.title.chars().any(|c| {
+        // Control characters (except common whitespace)
+        (c.is_control() && !matches!(c, '\t' | '\n' | '\r')) ||
+        // Zero-width characters
+        matches!(c, 
+            '\u{200B}' | // Zero Width Space
+            '\u{200C}' | // Zero Width Non-Joiner
+            '\u{200D}' | // Zero Width Joiner
+            '\u{FEFF}' | // Zero Width No-Break Space
+            '\u{00AD}'   // Soft Hyphen
+        ) ||
+        // Bidirectional formatting characters
+        matches!(c, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}') ||
+        // Other invisible formatting characters
+        matches!(c, '\u{2060}'..='\u{206F}')
+    }) {
+        tracing::warn!(
+            "Workflow {} title update failed: Title contains invalid characters (control or invisible characters)",
+            workflow_uuid
+        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Title contains invalid characters (control or invisible characters are not allowed)" })),
+        ));
+    }
+
+    // Mock: Log the title change (in production, save to database)
+    tracing::info!(
+        "Workflow {} title updated successfully to: {}",
+        workflow_uuid,
+        payload.title
+    );
+
+    Ok(Json(json!({
+        "message": "Title updated successfully",
+        "workflow_uuid": workflow_uuid,
+        "title": payload.title
+    })))
 }

@@ -1,0 +1,47 @@
+---
+alwaysApply: false
+description: Defines authentication requirements for API endpoints. All protected endpoints must require JWT tokens, while public endpoints (login, register) must not.
+---
+
+# API Authentication Rules
+
+## JWT Token Requirements
+
+### Protected Endpoints
+**ALL API endpoints EXCEPT `/api/login` and `/api/register` MUST require JWT authentication.**
+
+When implementing frontend API calls:
+- **MUST** include JWT token in `Authorization: Bearer <token>` header
+- **MUST** use `getToken()` from `@/lib/auth` to retrieve the token
+- **MUST** check if token exists before adding to headers
+
+Example pattern:
+```typescript
+const token = getToken();
+const response = await fetch(getApiEndpoint('/api/endpoint'), {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` }),
+  },
+  body: JSON.stringify(data),
+});
+```
+
+### Public Endpoints
+The following endpoints are **public** and must **NOT** require JWT tokens:
+- `/api/login` - User login
+- `/api/register` - User registration
+- `/api/health` - Health check (optional, can be public)
+
+### Backend Implementation
+- All protected endpoints should validate JWT tokens
+- Extract token from `Authorization: Bearer <token>` header
+- Validate token signature and expiration
+- Return `401 Unauthorized` if token is missing or invalid
+
+### Frontend Implementation
+- Always call `getToken()` from `@/lib/auth` for protected endpoints
+- Include token conditionally: `...(token && { Authorization: \`Bearer ${token}\` })`
+- Handle 401 responses by redirecting to login page
+- Never hardcode tokens or expose them in client-side code

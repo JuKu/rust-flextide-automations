@@ -1,24 +1,52 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { editWorkflowTitle } from "@/lib/api";
+import { ErrorDialog } from "@/components/common/ErrorDialog";
 
 interface WorkflowEditorHeaderProps {
   workflowId: string;
 }
 
 export function WorkflowEditorHeader({ workflowId }: WorkflowEditorHeaderProps) {
-  // workflowId will be used for saving workflow changes in the future
-  void workflowId;
   const [workflowTitle, setWorkflowTitle] = useState("Workflow 100000000 - Not Saved");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
   const titleInputRef = useRef<HTMLInputElement>(null);
   const workflowVersion = "Version 1001";
 
-  const handleTitleSave = (newTitle: string) => {
-    if (newTitle.trim().length > 0 && newTitle.length <= 50) {
-      setWorkflowTitle(newTitle);
+  const handleTitleSave = async (newTitle: string) => {
+    if (newTitle.trim().length === 0 || newTitle.length > 50) {
+      setIsEditingTitle(false);
+      return;
     }
-    setIsEditingTitle(false);
+
+    setIsSaving(true);
+    try {
+      await editWorkflowTitle(workflowId, newTitle);
+      setWorkflowTitle(newTitle);
+      setIsEditingTitle(false);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to save workflow title";
+      setErrorDialog({
+        isOpen: true,
+        title: "Error Saving Workflow Title",
+        message: errorMessage,
+      });
+      // Keep editing mode open on error so user can retry
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -53,22 +81,39 @@ export function WorkflowEditorHeader({ workflowId }: WorkflowEditorHeaderProps) 
               />
               <button
                 onClick={handleSaveClick}
-                className="p-1 rounded-md text-flextide-primary hover:bg-flextide-neutral-light-bg transition-colors flex-shrink-0"
+                disabled={isSaving}
+                className="p-1 rounded-md text-flextide-primary hover:bg-flextide-neutral-light-bg transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Save workflow title"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
+                {isSaving ? (
+                  <svg
+                    className="w-4 h-4 animate-spin"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
+                    />
+                  </svg>
+                )}
               </button>
             </div>
           ) : (
@@ -222,6 +267,16 @@ export function WorkflowEditorHeader({ workflowId }: WorkflowEditorHeaderProps) 
           Save
         </button>
       </div>
+
+      {/* Error Dialog */}
+      <ErrorDialog
+        isOpen={errorDialog.isOpen}
+        onClose={() =>
+          setErrorDialog({ isOpen: false, title: "", message: "" })
+        }
+        title={errorDialog.title}
+        message={errorDialog.message}
+      />
     </div>
   );
 }
