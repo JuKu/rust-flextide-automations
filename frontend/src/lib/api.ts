@@ -2,6 +2,8 @@
  * API client configuration and utilities
  */
 
+import { getToken } from './auth';
+
 /**
  * Get the API base URL from environment variable
  */
@@ -151,6 +153,37 @@ export async function logout(userUUID: string): Promise<void> {
   } catch (error) {
     // Log error but don't throw - logout should succeed even if API call fails
     console.error('Logout API call failed:', error);
+  }
+}
+
+export interface Organization {
+  uuid: string;
+  title: string;
+  is_admin: boolean;
+}
+
+/**
+ * Get list of organizations the user belongs to
+ */
+export async function listOwnOrganizations(): Promise<Organization[]> {
+  try {
+    const token = getToken();
+    const response = await fetch(getApiEndpoint('/api/organizations/list-own'), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch organizations');
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Failed to fetch organizations:', error);
+    throw error;
   }
 }
 

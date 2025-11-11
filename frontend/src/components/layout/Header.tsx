@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { logout } from "@/lib/api";
+import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
 import { removeToken, getTokenPayload } from "@/lib/auth";
 
 interface MenuItem {
@@ -49,9 +49,35 @@ export function Header() {
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const orgMenuRef = useRef<HTMLDivElement>(null);
 
-  // Mock organization data - in production, fetch from API
-  const [currentOrg] = useState("My Organization");
-  const organizations = ["My Organization", "Another Org", "Test Org"];
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [currentOrgUuid, setCurrentOrgUuid] = useState<string | null>(null);
+  const [loadingOrgs, setLoadingOrgs] = useState(true);
+  const initializedRef = useRef(false);
+
+  // Fetch organizations on mount
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    async function fetchOrganizations() {
+      try {
+        const orgs = await listOwnOrganizations();
+        setOrganizations(orgs);
+        // Set first organization as current by default
+        if (orgs.length > 0) {
+          setCurrentOrgUuid(orgs[0].uuid);
+        }
+      } catch (error) {
+        console.error("Failed to fetch organizations:", error);
+      } finally {
+        setLoadingOrgs(false);
+      }
+    }
+
+    fetchOrganizations();
+  }, []);
+
+  const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -225,9 +251,14 @@ export function Header() {
           <div className="relative" ref={orgMenuRef}>
             <button
               onClick={() => setOrgMenuOpen(!orgMenuOpen)}
-              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg border border-flextide-neutral-border"
+              disabled={loadingOrgs || organizations.length === 0}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg border border-flextide-neutral-border disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span>{currentOrg}</span>
+              <span>
+                {loadingOrgs
+                  ? "Loading..."
+                  : currentOrg?.title || "No Organization"}
+              </span>
               <svg
                 className={`w-4 h-4 transition-transform ${
                   orgMenuOpen ? "rotate-180" : ""
@@ -245,22 +276,28 @@ export function Header() {
               </svg>
             </button>
 
-            {orgMenuOpen && (
+            {orgMenuOpen && organizations.length > 0 && (
               <div className="absolute right-0 mt-1 w-56 rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border shadow-lg py-1 z-50">
                 {organizations.map((org) => (
                   <button
-                    key={org}
+                    key={org.uuid}
                     onClick={() => {
-                      // In production, switch organization via API
+                      setCurrentOrgUuid(org.uuid);
                       setOrgMenuOpen(false);
+                      // TODO: In production, switch organization via API
                     }}
                     className={`block w-full text-left px-4 py-2 text-sm transition-colors ${
-                      org === currentOrg
+                      org.uuid === currentOrgUuid
                         ? "bg-flextide-primary text-white"
                         : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
                     }`}
                   >
-                    {org}
+                    <div className="flex items-center justify-between">
+                      <span>{org.title}</span>
+                      {org.is_admin && (
+                        <span className="text-xs opacity-75">Admin</span>
+                      )}
+                    </div>
                   </button>
                 ))}
               </div>

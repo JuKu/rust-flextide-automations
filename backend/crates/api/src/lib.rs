@@ -96,6 +96,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/login", post(login))
         .route("/api/register", post(register))
         .route("/api/logout", post(logout))
+        .route("/api/organizations/list-own", get(list_own_organizations))
         .layer(
             ServiceBuilder::new()
                 .layer(trace_layer)
@@ -211,4 +212,46 @@ pub async fn logout(
     tracing::info!("User with userUUID {} has logged out", payload.user_uuid);
     
     Ok(Json(json!({ "message": "Logged out successfully" })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct Organization {
+    pub uuid: String,
+    pub title: String,
+    pub is_admin: bool,
+}
+
+pub async fn list_own_organizations(
+    State(_state): State<AppState>,
+) -> Result<Json<Vec<Organization>>, (StatusCode, Json<Value>)> {
+    // Mock data - in production, fetch from database
+    let organizations = vec![
+        Organization {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            title: "My Organization".to_string(),
+            is_admin: true,
+        },
+        Organization {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            title: "Another Org".to_string(),
+            is_admin: true,
+        },
+        Organization {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            title: "Test Org".to_string(),
+            is_admin: true,
+        },
+        Organization {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            title: "Test Org 2".to_string(),
+            is_admin: false,
+        },
+        Organization {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            title: "Test Org 3".to_string(),
+            is_admin: false,
+        },
+    ];
+
+    Ok(Json(organizations))
 }
