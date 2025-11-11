@@ -1,9 +1,60 @@
+[package]
+name = "flextide-backend"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "api"
+path = "bin/api.rs"
+
+[[bin]]
+name = "worker"
+path = "bin/worker.rs"
+
 [workspace]
 members = [
-    "crates/core",
+    "crates/flextide-core",
     "crates/api",
     "crates/worker",
     "crates/sdk",
     "crates/node_registry"
 ]
 resolver = "3"
+
+[dependencies]
+api = { path = "crates/api" }
+anyhow = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+jsonwebtoken = { workspace = true }
+chrono = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Shared dev dependencies for all crates
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.48.0", features = ["full"] }
+log = "0.4"
+env_logger = "0.11.8"
+anyhow = "1.0"
+thiserror = "2.0.17"
+axum = "0.8.6"
+jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
+chrono = { version = "0.4", features = ["serde"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+
+# Test dependencies
+[dev-dependencies]
+api = { path = "crates/api" }
+axum-test = "18.2.1"
+jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }

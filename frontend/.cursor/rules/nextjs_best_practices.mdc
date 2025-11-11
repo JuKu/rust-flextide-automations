@@ -1,0 +1,211 @@
+---
+description: Defines Next.js 16 best practices, App Router patterns, and vertical architecture guidelines for the frontend. Ensures scalable, maintainable, and performant Next.js applications.
+alwaysApply: false
+globs: *.tsx,*.ts,*.jsx,*.jsx
+---
+# Next.js 16 Best Practices & Vertical Architecture
+
+## Architecture Principles
+
+### Vertical Architecture (Feature-Based)
+- Organize code by feature/domain, not by file type
+- Each feature module is self-contained with its own components, hooks, utils, and types
+- Features should be independent and loosely coupled
+- Colocate related files together (components, hooks, types, utils)
+
+### Directory Structure Pattern
+
+```
+/src
+  /app                    → Next.js App Router routes
+  /features               → Feature modules (vertical slices)
+    /editor
+      /components
+      /hooks
+      /utils
+      /types
+      /lib
+    /marketplace
+      /components
+      /hooks
+      /utils
+      /types
+      /lib
+    /nodes
+      /components
+      /hooks
+      /utils
+      /types
+      /lib
+  /components             → Shared UI components
+    /ui                   → Reusable UI primitives (buttons, inputs, etc.)
+    /layout               → Layout components (header, footer, sidebar)
+  /lib                    → Shared utilities and configurations
+  /hooks                  → Shared React hooks
+  /types                  → Shared TypeScript types
+  /utils                  → Shared utility functions
+```
+
+## Next.js 16 App Router Best Practices
+
+### Server Components (Default)
+- Use Server Components by default for better performance
+- Server Components render on the server, reducing client-side JavaScript
+- No client-side interactivity (no hooks, event handlers, or browser APIs)
+- Can directly access databases, file systems, and backend services
+- Use for: data fetching, static content, SEO-critical pages
+
+### Client Components
+- Mark with `"use client"` directive at the top of the file
+- Use only when needed: interactivity, browser APIs, hooks, event handlers
+- Keep Client Components small and focused
+- Prefer Server Components and pass data down as props
+
+### Data Fetching
+- Use async Server Components for data fetching (no useEffect needed)
+- Fetch data directly in Server Components or Server Actions
+- Use React Suspense for loading states and parallel data fetching
+- Implement proper error boundaries with `error.tsx`
+- Use `loading.tsx` for loading states
+
+### Server Actions
+- Use Server Actions for mutations (forms, data updates)
+- Place Server Actions in separate files with `"use server"` directive
+- Use Server Actions instead of API routes when possible
+- Validate and sanitize all inputs on the server
+
+### Route Organization
+- Use App Router file conventions: `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`
+- Implement route groups with `(groupName)` for organization without affecting URLs
+- Use dynamic routes with `[param]` for dynamic segments
+- Use parallel routes with `@folder` for independent loading streams
+
+## Performance Optimization
+
+### Code Splitting
+- Leverage automatic route-based code splitting
+- Use dynamic imports for heavy components: `const Component = dynamic(() => import('./Component'))`
+- Split large libraries and load on demand
+- Use `next/dynamic` with `ssr: false` for client-only components
+
+### Image Optimization
+- Always use Next.js `Image` component instead of `<img>` tags
+- Specify `width` and `height` or use `fill` for responsive images
+- Use `priority` for above-the-fold images
+- Leverage automatic format optimization (WebP, AVIF)
+
+### Caching Strategies
+- Use Next.js built-in caching: `cache()`, `revalidate`, `fetch` options
+- Implement ISR (Incremental Static Regeneration) for dynamic content
+- Use `unstable_cache` for custom caching needs
+- Set appropriate `cache` and `revalidate` options for data fetching
+
+### Font Optimization
+- Use `next/font` for automatic font optimization
+- Self-host fonts instead of external CDNs
+- Use `font-display: swap` to prevent invisible text during loading
+- Subset fonts to include only necessary characters
+
+## Code Organization
+
+### Component Structure
+- Keep components small and focused (single responsibility)
+- Extract reusable logic into custom hooks
+- Use TypeScript for all components and props
+- Colocate component-specific types with components
+
+### State Management
+- Prefer Server Components for server state
+- Use React Context for shared client state (sparingly)
+- Use Zustand or Jotai for complex client-side state
+- Minimize global state - keep state as local as possible
+
+### Type Safety
+- Use TypeScript strictly (no `any` types)
+- Define types in feature modules or shared `/types` directory
+- Use type inference where possible, explicit types where needed
+- Leverage Next.js built-in types (`NextPage`, `GetServerSideProps`, etc.)
+
+### Path Aliases
+- Use `@/` alias for imports from `src/` directory
+- Configure in `tsconfig.json`:
+  ```json
+  {
+    "compilerOptions": {
+      "baseUrl": ".",
+      "paths": {
+        "@/*": ["./src/*"]
+      }
+    }
+  }
+  ```
+
+## Error Handling
+
+### Error Boundaries
+- Implement `error.tsx` files for route-level error boundaries
+- Use React Error Boundaries for component-level errors
+- Provide user-friendly error messages
+- Log errors appropriately for debugging
+
+### Loading States
+- Use `loading.tsx` for route-level loading states
+- Implement Suspense boundaries for granular loading
+- Show skeleton loaders instead of spinners when possible
+- Use React Suspense for parallel data fetching
+
+## Security Best Practices
+
+### Server Actions
+- Always validate and sanitize inputs in Server Actions
+- Use server-side validation, not just client-side
+- Protect against CSRF attacks (Next.js handles this automatically)
+- Never expose sensitive data in Server Components
+
+### Environment Variables
+- Use `.env.local` for local development
+- Prefix server-only variables with `NEXT_PUBLIC_` only if needed client-side
+- Never commit `.env.local` to version control
+- Use different environment files for different environments
+
+## Testing
+
+### Component Testing
+- Use Jest and React Testing Library for unit tests
+- Test Server Components separately from Client Components
+- Mock external dependencies and API calls
+- Test user interactions, not implementation details
+
+### E2E Testing
+- Use Playwright for end-to-end testing
+- Test critical user flows (authentication, workflows, marketplace)
+- Test across different browsers and devices
+- Implement visual regression testing where appropriate
+
+## Build & Deployment
+
+### Build Optimization
+- Use Next.js production build: `next build`
+- Analyze bundle size with `@next/bundle-analyzer`
+- Remove unused dependencies regularly
+- Optimize imports (avoid barrel exports in production)
+
+### Environment Configuration
+- Use different configs for development, staging, and production
+- Leverage Next.js environment variable system
+- Use feature flags for gradual rollouts
+- Configure proper CORS and security headers
+
+## Code Quality
+
+### Linting & Formatting
+- Use ESLint with Next.js config
+- Use Prettier for code formatting
+- Enforce consistent code style across the team
+- Run linting in CI/CD pipeline
+
+### Documentation
+- Document complex components and hooks
+- Use JSDoc comments for public APIs
+- Keep README files updated for each feature module
+- Document architectural decisions in code comments

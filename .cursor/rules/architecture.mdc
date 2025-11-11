@@ -6,16 +6,16 @@ description: Specifies the system architecture, module boundaries, and execution
 
 The system has a vertical architecture with Rust workspace modules:
 
-/crates
-  /core           → Shared logic (workflow model, ABI, schema validation)
-  /api            → HTTP API (Axum), auth, CRUD, marketplace, build pipeline
-  /worker         → Execution engine (JS runtime, WASM runtime, scheduler)
-  /sdk            → Rust SDK for creating WASM nodes
-  /node_registry  → Node metadata loader, marketplace integration
-
-/bin
-  api.rs          → Starts API server
-  worker.rs       → Starts execution worker
+/backend
+  /crates
+    /flextide-core  → Shared logic (workflow model, ABI, schema validation)
+    /api            → HTTP API (Axum + utoipa), auth, CRUD, marketplace, build pipeline
+    /worker         → Execution engine (JS runtime, WASM runtime, scheduler)
+    /sdk            → Rust SDK for creating WASM nodes
+    /node_registry  → Node metadata loader, marketplace integration
+  /bin
+    api.rs          → Starts API server
+    worker.rs       → Starts execution worker
 
 /frontend         → Admin UI (Next.js 16), React Flow editor, marketplace UI
 
@@ -27,6 +27,7 @@ Key architecture principles:
 - Node Marketplace stores Packs in S3/Minio.
 - Next.js UI loads nodes dynamically from Registry API.
 - Graph Editor outputs standardized workflow JSON.
+- All API endpoints must have OpenAPI documentation via utoipa.
 
 Execution Model:
 - Worker loads workflow → resolves node graph → executes node by node

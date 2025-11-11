@@ -1,0 +1,1 @@
+Logo was created with the help of ChatGPT.

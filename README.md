@@ -1,5 +1,9 @@
 # Flextide – A Modern, Modular, High-Performance Workflow Automation Platform
 
+<div align="center">
+  <img src="frontend/public/logo/Logo_new.png" alt="Flextide Logo" width="400">
+</div>
+
 Built with **Rust**, **WASM**, **JS/TS sandboxing**, and **Next.js**.
 
 Flextide is a next-generation alternative to tools like n8n or Zapier, designed with a focus on **performance**, **security**, **extensibility**, and **developer experience**.  
@@ -62,19 +66,20 @@ Separate Rust crates for:
 
 ## 🏗️ Project Structure
 
-/crates
-/core # Shared workflow engine logic, ABI, validation
-/api # REST API, auth, marketplace, TS compiler
-/worker # Execution engine (JS, WASM, Rust nodes)
-/sdk # Rust SDK for writing WASM nodes
-/node_registry # Metadata + dynamic node loading
-
-/bin
-  api.rs # Starts API server
-  worker.rs # Starts execution worker
+/backend
+  /crates
+    /flextide-core # Shared workflow engine logic, ABI, validation
+    /api # REST API, auth, marketplace, TS compiler
+    /worker # Execution engine (JS, WASM, Rust nodes)
+    /sdk # Rust SDK for writing WASM nodes
+    /node_registry # Metadata + dynamic node loading
+  /bin
+    api.rs # Starts API server
+    worker.rs # Starts execution worker
+  /migrations # SQLx migrations for MySQL & PostgreSQL
+  Cargo.toml # Workspace root
 
 /frontend # Next.js 16 app containing editor + dashboard
-/migrations # SQLx migrations for MySQL & PostgreSQL
 
 ## 🚀 Getting Started
 
@@ -107,18 +112,23 @@ pnpm install
 ### 4. Run migrations
 
 ```shell
+cd backend
 sqlx migrate run
 ```
+
+Note: Migrations are located in `/backend/migrations`.
 
 ### 5. Start services
 
 API Backend:
 ```shell
+cd backend
 cargo run --bin api
 ```
 
 Worker:
 ```shell
+cd backend
 cargo run --bin worker
 ```
 

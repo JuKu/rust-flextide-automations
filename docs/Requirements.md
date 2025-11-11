@@ -11,8 +11,9 @@ Flextide is a modular, secure, and high-performance workflow automation platform
 - ABI: { "input": {}, "config": {} } → { "output": {} }
 
 ## 3. Architecture
-/crates: core, api, worker, sdk, node_registry
-/bin: api.rs, worker.rs
+/backend
+  /crates: flextide-core, api, worker, sdk, node_registry
+  /bin: api.rs, worker.rs
 /frontend: Next.js 16 admin UI
 
 ## 4. Node Marketplace

@@ -9,9 +9,11 @@ description: Enforces coding standards and conventions for Rust backend and Type
 - Use `tokio` for async.
 - Use `anyhow`, `thiserror` for errors.
 - Use `sqlx` for DB with compile-time checks.
+- Use `utoipa` for OpenAPI/Swagger documentation generation.
 - All crates must expose clean modules, no circular deps.
 - Workers must never panic during node execution.
 - All Node ABI structs must derive `Serialize` + `Deserialize`.
+- All API endpoints must have OpenAPI documentation via `utoipa` annotations.
 
 ## Next.js + React
 - Use React Flow for editor.

@@ -5,25 +5,29 @@ description: Defines the project folder structure and organization for Rust crat
 # Folder Structure Rules (Rust + Next.js)
 
 Root:
-- Cargo workspace root
+- backend folder for Rust workspace
 - frontend folder for UI
-- migrations folder for sqlx
 
-/crates
-  /core
-  /api
-  /worker
-  /sdk
-  /node_registry
-
-/bin
-  api.rs
-  worker.rs
+/backend
+  /crates
+    /flextide-core
+    /api
+    /worker
+    /sdk
+    /node_registry
+  /bin
+    api.rs
+    worker.rs
+  /migrations
+    SQLx migrations for MySQL & PostgreSQL
+  Cargo.toml (workspace root)
 
 /frontend
-  /editor
-  /marketplace
-  /nodes
+  /src
+    /app
+    /editor
+    /marketplace
+    /nodes
 
 /docs
   /end-user-docs    → End user documentation (user guides, tutorials, how-tos)

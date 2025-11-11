@@ -4,12 +4,13 @@
 Flextide is a modular workflow automation platform built on Rust, WASM, and Next.js. The system is split into independent services and crates to ensure high performance, maintainability, and scalability.
 
 ## Components
-- **API Service (Axum)**: Authentication, workflow CRUD, marketplace, JS/TS build pipeline.
-- **Worker Service**: Executes workflow nodes via JS sandbox, WASM, or native Rust.
-- **Core Crate**: Workflow data models, ABI definitions, graph validation.
-- **SDK Crate**: For building Rust → WASM nodes.
-- **Node Registry**: Handles installed node metadata and marketplace integration.
-- **Next.js Admin UI**: Dashboard, editor, marketplace UI.
+- **Backend** (`/backend`): Rust workspace containing all backend services
+  - **API Service (Axum)**: Authentication, workflow CRUD, marketplace, JS/TS build pipeline.
+  - **Worker Service**: Executes workflow nodes via JS sandbox, WASM, or native Rust.
+  - **Core Crate**: Workflow data models, ABI definitions, graph validation.
+  - **SDK Crate**: For building Rust → WASM nodes.
+  - **Node Registry**: Handles installed node metadata and marketplace integration.
+- **Frontend** (`/frontend`): Next.js Admin UI - Dashboard, editor, marketplace UI.
 
 ## Execution Flow
 1. Trigger fires (Webhook/Cron/etc.)
