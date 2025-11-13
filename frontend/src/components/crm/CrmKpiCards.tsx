@@ -92,9 +92,12 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Total customers in CRM system
         </div>
-        <div className="text-2xl font-semibold text-flextide-neutral-text-dark">
+        <a
+          href="/modules/crm/customers"
+          className="text-2xl font-semibold text-flextide-neutral-text-dark hover:text-flextide-primary-accent cursor-pointer transition-colors"
+        >
           {kpis.total_users}
-        </div>
+        </a>
       </div>
 
       {/* Open Deals */}

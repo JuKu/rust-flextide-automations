@@ -2,15 +2,19 @@ mod api;
 mod customer;
 
 use axum::{
-    extract::Extension,
+    extract::{Extension, Query},
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
 use chrono::{Datelike, Utc};
+use flextide_core::database::DatabasePool;
+use flextide_core::jwt::Claims;
+use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::Serialize;
 use serde_json::json;
+use sqlx::Row;
 
 pub use customer::{
     CrmCustomer, CrmCustomerAddress, CrmCustomerNote, CreateCrmCustomerAddressRequest,
@@ -55,6 +59,10 @@ pub struct Customer {
 #[derive(Debug, Serialize)]
 pub struct CustomersResponse {
     pub customers: Vec<Customer>,
+    pub total: u32,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,33 +100,157 @@ pub struct ClosedDealsResponse {
 }
 
 async fn get_kpis(
-    Extension(_org_uuid): Extension<String>,
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    // TODO: Fetch from database based on org_uuid
-    // For now, return mocked data
+    // Count total customers for the organization
+    let total_customers = match &pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = ?")
+                .bind(&org_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count customers for organization {}: {}", org_uuid, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to fetch customer count" })),
+                    )
+                })?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = $1")
+                .bind(&org_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count customers for organization {}: {}", org_uuid, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to fetch customer count" })),
+                    )
+                })?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = ?1")
+                .bind(&org_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count customers for organization {}: {}", org_uuid, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to fetch customer count" })),
+                    )
+                })?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+    };
     
-    // Mock data
+    // TODO: Fetch other KPIs from database based on org_uuid
+    // For now, return mocked data for other fields
     let response = KpiResponse {
         total_sales_this_month: 0.0,
         orders_this_month: 0,
         orders_last_month: 0,
         win_rate_this_month: 0.0,
         avg_days_to_close: 0.0,
-        total_users: 0,
+        total_users: total_customers,
         open_deals: 0.0,
     };
     
     Ok(Json(json!(response)))
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct CustomersQuery {
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
 async fn get_customers(
-    Extension(_org_uuid): Extension<String>,
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Query(params): Query<CustomersQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    // TODO: Fetch from database based on org_uuid
-    // For now, return empty list
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_all_customers")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view all customers" })),
+        ));
+    }
+
+    let page = params.page.unwrap_or(1);
+    let page_size = params.page_size.unwrap_or(50).min(50);
+    
+    // Fetch customers with pagination
+    let (crm_customers, total_count) = CrmCustomer::list_customers_paginated(&pool, &org_uuid, page, page_size)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list customers: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to fetch customers" })),
+            )
+        })?;
+    
+    // Convert to response format
+    let customers: Vec<Customer> = crm_customers
+        .into_iter()
+        .map(|c| Customer {
+            id: c.uuid,
+            name: format!("{} {}", c.first_name, c.last_name),
+            email: c.email.unwrap_or_default(),
+            company: c.company_name,
+            status: "Active".to_string(), // TODO: Add status field to database
+            created_at: c.created_at.to_rfc3339(),
+            last_contact: None, // TODO: Add last_contact field to database
+        })
+        .collect();
+    
+    let total_pages = (total_count as f64 / page_size as f64).ceil() as u32;
     
     let response = CustomersResponse {
-        customers: vec![],
+        customers,
+        total: total_count,
+        page,
+        page_size,
+        total_pages,
     };
     
     Ok(Json(json!(response)))

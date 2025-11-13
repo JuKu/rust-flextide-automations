@@ -302,5 +302,27 @@ impl CrmCustomer {
     ) -> Result<Vec<CrmCustomer>, CrmCustomerDatabaseError> {
         database::search_customers(pool, organization_uuid, query).await
     }
+
+    /// List customers for an organization with pagination
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `organization_uuid` - UUID of the organization to list customers for
+    /// * `page` - Page number (1-based)
+    /// * `page_size` - Number of customers per page (max 50)
+    ///
+    /// # Returns
+    /// Returns a tuple of (customers, total_count)
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if the database query fails
+    pub async fn list_customers_paginated(
+        pool: &flextide_core::database::DatabasePool,
+        organization_uuid: &str,
+        page: u32,
+        page_size: u32,
+    ) -> Result<(Vec<CrmCustomer>, u32), CrmCustomerDatabaseError> {
+        database::list_customers_paginated(pool, organization_uuid, page, page_size).await
+    }
 }
 

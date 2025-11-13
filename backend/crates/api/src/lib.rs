@@ -320,6 +320,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/register", post(register))
         .route("/api/logout", post(logout))
         .route("/api/organizations/list-own", get(list_own_organizations))
+        .route("/api/permissions", get(get_permissions))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .nest("/api", flextide_modules_crm::create_router())
         .layer(
@@ -587,6 +588,33 @@ pub async fn list_own_organizations(
         .collect();
 
     Ok(Json(result))
+}
+
+/// Get all permissions for the current user in the current organization
+///
+/// GET /api/permissions
+/// Returns a list of permission strings that the user has for the current organization
+pub async fn get_permissions(
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // TODO: Fetch real permissions from database
+    // For now, return mock data
+    // Mock permissions - in production, query user_permissions table
+    let permissions = vec![
+        "module_crm_create_customer",
+        "module_crm_search_customers",
+        "module_crm_delete_customer",
+        "module_crm_add_note",
+        "module_crm_add_address",
+        // Add more mock permissions as needed
+    ];
+    
+    Ok(Json(json!({
+        "permissions": permissions,
+        "user_uuid": claims.user_uuid,
+        "organization_uuid": org_uuid
+    })))
 }
 
 #[derive(Debug, Deserialize)]

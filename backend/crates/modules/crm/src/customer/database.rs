@@ -873,3 +873,172 @@ pub async fn search_customers(
     }
 }
 
+/// List customers for an organization with pagination
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization to list customers for
+/// * `page` - Page number (1-based)
+/// * `page_size` - Number of customers per page (max 50)
+///
+/// # Returns
+/// Returns a tuple of (customers, total_count)
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database query fails
+pub async fn list_customers_paginated(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    page: u32,
+    page_size: u32,
+) -> Result<(Vec<CrmCustomer>, u32), CrmCustomerDatabaseError> {
+    // Ensure page_size doesn't exceed 50
+    let page_size = page_size.min(50);
+    let offset = (page.saturating_sub(1)) * page_size;
+    
+    // Get total count
+    let total_count = match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = ?")
+                .bind(organization_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = $1")
+                .bind(organization_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM module_crm_customers WHERE organization_uuid = ?1")
+                .bind(organization_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count as u32
+        }
+    };
+    
+    // Get paginated customers
+    let customers = match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = ? 
+                 ORDER BY last_name ASC, first_name ASC 
+                 LIMIT ? OFFSET ?"
+            )
+            .bind(organization_uuid)
+            .bind(page_size as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await?;
+            
+            rows.into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect()
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = $1 
+                 ORDER BY last_name ASC, first_name ASC 
+                 LIMIT $2 OFFSET $3"
+            )
+            .bind(organization_uuid)
+            .bind(page_size as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await?;
+            
+            rows.into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect()
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = ?1 
+                 ORDER BY last_name ASC, first_name ASC 
+                 LIMIT ?2 OFFSET ?3"
+            )
+            .bind(organization_uuid)
+            .bind(page_size as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await?;
+            
+            rows.into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect()
+        }
+    };
+    
+    Ok((customers, total_count))
+}
+

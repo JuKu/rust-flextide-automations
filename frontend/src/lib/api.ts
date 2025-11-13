@@ -301,6 +301,10 @@ export interface CrmCustomer {
 
 export interface CrmCustomersResponse {
   customers: CrmCustomer[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface CrmPipelineStatus {
@@ -361,9 +365,13 @@ export async function getCrmKpis(): Promise<CrmKpiResponse> {
   }
 }
 
-export async function getCrmCustomers(): Promise<CrmCustomersResponse> {
+export async function getCrmCustomers(page: number = 1, pageSize: number = 50): Promise<CrmCustomersResponse> {
   try {
-    const response = await fetch(getApiEndpoint('/api/modules/crm/customers'), {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers?${params.toString()}`), {
       method: 'GET',
       headers: getApiHeaders('/api/modules/crm/customers'),
     });
