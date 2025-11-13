@@ -581,11 +581,11 @@ pub async fn list_own_organizations(
             // User is admin if role is 'admin' or 'owner'
             let is_admin = role == "admin" || role == "owner";
             // TODO: Add license field to organizations table, defaulting to Free for now
-            Organization {
+        Organization {
                 uuid,
                 title: name,
                 is_admin,
-                license: License::Free,
+            license: License::Free,
             }
         })
         .collect();

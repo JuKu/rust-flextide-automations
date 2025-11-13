@@ -10,7 +10,6 @@ import { LineChart } from "@/components/common/LineChart";
 import { getCurrentOrganizationUuid } from "@/lib/organization";
 import {
   getCrmKpis,
-  getCrmCustomers,
   getCrmSalesPipelineChart,
   getCrmCountriesChart,
   getCrmClosedDeals,
@@ -25,7 +24,6 @@ import {
 export default function CrmPage() {
   const [kpis, setKpis] = useState<CrmKpiResponse | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const [allCustomers, setAllCustomers] = useState<CrmCustomer[]>([]);
   const [pipelineData, setPipelineData] = useState<CrmPipelineStatus[]>([]);
   const [countriesData, setCountriesData] = useState<CrmCountryData[]>([]);
   const [closedDealsData, setClosedDealsData] = useState<CrmClosedDealData[]>([]);
@@ -62,18 +60,18 @@ export default function CrmPage() {
         setLoading(true);
         setError(null);
 
-        const [kpisData, customersData, pipelineData, countriesData, closedDealsData] =
+        const [kpisData, pipelineData, countriesData, closedDealsData] =
           await Promise.all([
             getCrmKpis(),
-            getCrmCustomers(),
             getCrmSalesPipelineChart(),
             getCrmCountriesChart(),
             getCrmClosedDeals(),
           ]);
 
         setKpis(kpisData);
-        setCustomers(customersData.customers);
-        setAllCustomers(customersData.customers);
+        // Don't fetch customers on initial load - GDPR compliance
+        // Customers will only be shown when user searches
+        setCustomers([]);
         setPipelineData(pipelineData.statuses);
         setCountriesData(countriesData.countries);
         setClosedDealsData(closedDealsData.deals);
@@ -88,18 +86,17 @@ export default function CrmPage() {
           const retryOrgUuid = getCurrentOrganizationUuid();
           if (retryOrgUuid) {
             try {
-              const [kpisData, customersData, pipelineData, countriesData, closedDealsData] =
+              const [kpisData, pipelineData, countriesData, closedDealsData] =
                 await Promise.all([
                   getCrmKpis(),
-                  getCrmCustomers(),
                   getCrmSalesPipelineChart(),
                   getCrmCountriesChart(),
                   getCrmClosedDeals(),
                 ]);
 
               setKpis(kpisData);
-              setCustomers(customersData.customers);
-              setAllCustomers(customersData.customers);
+              // Don't fetch customers on initial load - GDPR compliance
+              setCustomers([]);
               setPipelineData(pipelineData.statuses);
               setCountriesData(countriesData.countries);
               setClosedDealsData(closedDealsData.deals);
@@ -128,14 +125,9 @@ export default function CrmPage() {
   };
 
   const handleCustomerCreated = async () => {
-    // Refresh customers list
-    try {
-      const customersData = await getCrmCustomers();
-      setCustomers(customersData.customers);
-      setAllCustomers(customersData.customers);
-    } catch (err) {
-      console.error("Failed to refresh customers:", err);
-    }
+    // Don't automatically fetch all customers after creation (GDPR compliance)
+    // If user has an active search, they can search again to see the new customer
+    // The customers list will remain empty until user searches
   };
 
   const handleSearch = async (query: string) => {
@@ -144,9 +136,9 @@ export default function CrmPage() {
       clearTimeout(searchTimeout);
     }
 
-    // If query is empty, show all customers
+    // If query is empty, clear customers (GDPR compliance - don't show all customers)
     if (!query.trim()) {
-      setCustomers(allCustomers);
+      setCustomers([]);
       return;
     }
 
@@ -164,8 +156,8 @@ export default function CrmPage() {
           return;
         }
         
-        // On other errors, show all customers
-        setCustomers(allCustomers);
+        // On other errors, clear customers
+        setCustomers([]);
       }
     }, 300); // 300ms debounce
 
