@@ -87,10 +87,10 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
         </div>
       </div>
 
-      {/* Total users in CRM system */}
+      {/* Total customers in CRM system */}
       <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-secondary-purple p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
-          Total users in CRM system
+          Total customers in CRM system
         </div>
         <div className="text-2xl font-semibold text-flextide-neutral-text-dark">
           {kpis.total_users}

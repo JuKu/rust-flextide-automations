@@ -7,6 +7,7 @@ import { CrmCustomersSection } from "@/components/crm/CrmCustomersSection";
 import { CreateCustomerDialog } from "@/components/crm/CreateCustomerDialog";
 import { PieChart } from "@/components/common/PieChart";
 import { LineChart } from "@/components/common/LineChart";
+import { getCurrentOrganizationUuid } from "@/lib/organization";
 import {
   getCrmKpis,
   getCrmCustomers,
@@ -35,6 +36,28 @@ export default function CrmPage() {
 
   useEffect(() => {
     async function fetchData() {
+      // Wait for organization UUID to be available
+      // Check every 100ms, up to 5 seconds (50 attempts)
+      let attempts = 0;
+      const maxAttempts = 50;
+      
+      while (attempts < maxAttempts) {
+        const orgUuid = getCurrentOrganizationUuid();
+        if (orgUuid) {
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      // If still no organization UUID after waiting, show error
+      const orgUuid = getCurrentOrganizationUuid();
+      if (!orgUuid) {
+        setError("No organization selected. Please select an organization from the header.");
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -56,7 +79,42 @@ export default function CrmPage() {
         setClosedDealsData(closedDealsData.deals);
       } catch (err) {
         console.error("Failed to fetch CRM data:", err);
-        setError(err instanceof Error ? err.message : "Failed to load CRM data");
+        const errorMessage = err instanceof Error ? err.message : "Failed to load CRM data";
+        
+        // If it's a missing organization header error, wait a bit and retry once
+        if (errorMessage.includes("Missing X-Organization-UUID header")) {
+          // Wait a bit more for organization to be set, then retry once
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const retryOrgUuid = getCurrentOrganizationUuid();
+          if (retryOrgUuid) {
+            try {
+              const [kpisData, customersData, pipelineData, countriesData, closedDealsData] =
+                await Promise.all([
+                  getCrmKpis(),
+                  getCrmCustomers(),
+                  getCrmSalesPipelineChart(),
+                  getCrmCountriesChart(),
+                  getCrmClosedDeals(),
+                ]);
+
+              setKpis(kpisData);
+              setCustomers(customersData.customers);
+              setAllCustomers(customersData.customers);
+              setPipelineData(pipelineData.statuses);
+              setCountriesData(countriesData.countries);
+              setClosedDealsData(closedDealsData.deals);
+              setLoading(false);
+              return;
+            } catch {
+              // If retry also fails, show the original error
+              setError(errorMessage);
+            }
+          } else {
+            setError("No organization selected. Please select an organization from the header.");
+          }
+        } else {
+          setError(errorMessage);
+        }
       } finally {
         setLoading(false);
       }
@@ -99,7 +157,14 @@ export default function CrmPage() {
         setCustomers(searchResults.customers);
       } catch (err) {
         console.error("Failed to search customers:", err);
-        // On error, show all customers
+        
+        // If it's an organization membership error, reload the page to refresh organization selection
+        if (err instanceof Error && err.message.includes('does not belong to this organization')) {
+          window.location.reload();
+          return;
+        }
+        
+        // On other errors, show all customers
         setCustomers(allCustomers);
       }
     }, 300); // 300ms debounce

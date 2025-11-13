@@ -161,7 +161,7 @@ export function CrmCustomersSection({
         {customers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-flextide-neutral-text-medium mb-4">
-              You haven't added any customers yet.
+              Type in the search bar to find customers.
             </p>
             {onCreateCustomer && (
               <button

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createCrmCustomer } from "@/lib/api";
+import { ErrorDialog } from "@/components/common/ErrorDialog";
 
 interface CreateCustomerDialogProps {
   isOpen: boolean;
@@ -29,6 +30,11 @@ export function CreateCustomerDialog({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{ isOpen: boolean; title: string; message: string }>({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -129,6 +135,18 @@ export function CreateCustomerDialog({
       onClose();
     } catch (error) {
       console.error("Failed to create customer:", error);
+      
+      // If it's an organization membership error, show error dialog
+      if (error instanceof Error && error.message.includes('does not belong to this organization')) {
+        setErrorDialog({
+          isOpen: true,
+          title: "Organization Error",
+          message: "You don't have access to this organization. Please select a different organization from the header and try again.",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+      
       setErrors({
         submit: error instanceof Error ? error.message : "Failed to create customer",
       });
@@ -442,6 +460,14 @@ export function CreateCustomerDialog({
           </div>
         </form>
       </div>
+
+      {/* Error Dialog */}
+      <ErrorDialog
+        isOpen={errorDialog.isOpen}
+        onClose={() => setErrorDialog({ isOpen: false, title: "", message: "" })}
+        title={errorDialog.title}
+        message={errorDialog.message}
+      />
     </div>
   );
 }

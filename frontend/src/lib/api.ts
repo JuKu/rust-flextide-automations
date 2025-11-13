@@ -4,6 +4,7 @@
 
 import { getToken } from './auth';
 import { getCurrentOrganizationUuid } from './organization';
+import { handleNetworkError } from './toast';
 
 /**
  * Get the API base URL from environment variable
@@ -45,6 +46,17 @@ export function getApiEndpoint(path: string): string {
   const baseUrl = getApiBaseUrl().replace(/\/$/, '');
   const endpoint = path.startsWith('/') ? path : `/${path}`;
   return `${baseUrl}${endpoint}`;
+}
+
+/**
+ * Handle organization membership errors by clearing invalid organization UUID
+ */
+async function handleOrganizationMembershipError(errorMessage: string): Promise<void> {
+  if (errorMessage.includes('does not belong to this organization')) {
+    const { clearCurrentOrganizationUuid } = await import('./organization');
+    clearCurrentOrganizationUuid();
+    console.warn('[API] User does not belong to selected organization. Cleared organization UUID.');
+  }
 }
 
 /**
@@ -111,13 +123,8 @@ export async function login(credentials: LoginRequest): Promise<AuthResponse> {
 
     return response.json();
   } catch (error) {
-    // Check if it's a network error (fetch throws TypeError on network failures)
-    if (
-      error instanceof TypeError &&
-      (error.message.includes('fetch') ||
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('NetworkError'))
-    ) {
+    // Check if it's a network error and show toast
+    if (handleNetworkError(error)) {
       throw new Error('Backend API server is not reachable. Try later again.');
     }
     throw error;
@@ -157,13 +164,8 @@ export async function register(credentials: RegisterRequest): Promise<AuthRespon
 
     return response.json();
   } catch (error) {
-    // Check if it's a network error (fetch throws TypeError on network failures)
-    if (
-      error instanceof TypeError &&
-      (error.message.includes('fetch') ||
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('NetworkError'))
-    ) {
+    // Check if it's a network error and show toast
+    if (handleNetworkError(error)) {
       throw new Error('Backend API server is not reachable. Try later again.');
     }
     throw error;
@@ -182,6 +184,8 @@ export async function logout(userUUID: string): Promise<void> {
     });
   } catch (error) {
     // Log error but don't throw - logout should succeed even if API call fails
+    // Still show toast for network errors
+    handleNetworkError(error);
     console.error('Logout API call failed:', error);
   }
 }
@@ -220,6 +224,9 @@ export async function listOwnOrganizations(): Promise<Organization[]> {
 
     return response.json();
   } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
     console.error('Failed to fetch organizations:', error);
     throw error;
   }
@@ -263,6 +270,9 @@ export async function editWorkflowTitle(
 
     return response.json();
   } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
     console.error('Failed to update workflow title:', error);
     throw error;
   }
@@ -322,77 +332,162 @@ export interface CrmClosedDealsResponse {
 }
 
 export async function getCrmKpis(): Promise<CrmKpiResponse> {
-  const response = await fetch(getApiEndpoint('/api/modules/crm/kpis'), {
-    method: 'GET',
-    headers: getApiHeaders('/api/modules/crm/kpis'),
-  });
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/crm/kpis'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/kpis'),
+    });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch CRM KPIs');
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch CRM KPIs';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch CRM KPIs');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export async function getCrmCustomers(): Promise<CrmCustomersResponse> {
-  const response = await fetch(getApiEndpoint('/api/modules/crm/customers'), {
-    method: 'GET',
-    headers: getApiHeaders('/api/modules/crm/customers'),
-  });
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/crm/customers'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch CRM customers');
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch CRM customers';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch CRM customers');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export async function getCrmSalesPipelineChart(): Promise<CrmSalesPipelineChartResponse> {
-  const response = await fetch(
-    getApiEndpoint('/api/modules/crm/sales-pipeline-chart'),
-    {
-      method: 'GET',
-      headers: getApiHeaders('/api/modules/crm/sales-pipeline-chart'),
+  try {
+    const response = await fetch(
+      getApiEndpoint('/api/modules/crm/sales-pipeline-chart'),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/modules/crm/sales-pipeline-chart'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch sales pipeline chart data';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch sales pipeline chart data');
+      }
     }
-  );
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch sales pipeline chart data');
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export async function getCrmCountriesChart(): Promise<CrmCountriesChartResponse> {
-  const response = await fetch(
-    getApiEndpoint('/api/modules/crm/countries-chart'),
-    {
-      method: 'GET',
-      headers: getApiHeaders('/api/modules/crm/countries-chart'),
+  try {
+    const response = await fetch(
+      getApiEndpoint('/api/modules/crm/countries-chart'),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/modules/crm/countries-chart'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch countries chart data';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch countries chart data');
+      }
     }
-  );
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch countries chart data');
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export async function getCrmClosedDeals(): Promise<CrmClosedDealsResponse> {
-  const response = await fetch(
-    getApiEndpoint('/api/modules/crm/closed-deals'),
-    {
-      method: 'GET',
-      headers: getApiHeaders('/api/modules/crm/closed-deals'),
+  try {
+    const response = await fetch(
+      getApiEndpoint('/api/modules/crm/closed-deals'),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/modules/crm/closed-deals'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch closed deals data';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch closed deals data');
+      }
     }
-  );
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch closed deals data');
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 export interface CreateCrmCustomerRequest {
@@ -431,7 +526,9 @@ export async function createCrmCustomer(
     if (!response.ok) {
       try {
         const error: ApiError = await response.json();
-        throw new Error(error.error || 'Failed to create customer');
+        const errorMessage = error.error || 'Failed to create customer';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
       } catch (err) {
         if (err instanceof Error) {
           throw err;
@@ -442,6 +539,9 @@ export async function createCrmCustomer(
 
     return response.json();
   } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
     console.error('Failed to create customer:', error);
     throw error;
   }
@@ -462,7 +562,10 @@ export async function searchCrmCustomers(
     if (!response.ok) {
       try {
         const error: ApiError = await response.json();
-        throw new Error(error.error || 'Failed to search customers');
+        const errorMessage = error.error || 'Failed to search customers';
+        
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
       } catch (err) {
         if (err instanceof Error) {
           throw err;
@@ -473,6 +576,9 @@ export async function searchCrmCustomers(
 
     return response.json();
   } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
     console.error('Failed to search customers:', error);
     throw error;
   }
