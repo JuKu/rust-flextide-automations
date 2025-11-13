@@ -713,3 +713,163 @@ pub async fn delete_customer_address(
     Ok(())
 }
 
+/// Search customers by query string
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization to search customers in
+/// * `query` - Search query string (searches in first_name, last_name, email, company_name, phone_number, job_title)
+///
+/// # Returns
+/// Returns a vector of `CrmCustomer` matching the search query
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database query fails
+pub async fn search_customers(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    query: &str,
+) -> Result<Vec<CrmCustomer>, CrmCustomerDatabaseError> {
+    let search_pattern = format!("%{}%", query.trim());
+    
+    match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = ? 
+                 AND (
+                     first_name LIKE ? 
+                     OR last_name LIKE ? 
+                     OR email LIKE ? 
+                     OR company_name LIKE ? 
+                     OR phone_number LIKE ? 
+                     OR job_title LIKE ?
+                 )
+                 ORDER BY last_name ASC, first_name ASC",
+            )
+            .bind(organization_uuid)
+            .bind(&search_pattern)
+            .bind(&search_pattern)
+            .bind(&search_pattern)
+            .bind(&search_pattern)
+            .bind(&search_pattern)
+            .bind(&search_pattern)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = $1 
+                 AND (
+                     first_name ILIKE $2 
+                     OR last_name ILIKE $2 
+                     OR email ILIKE $2 
+                     OR company_name ILIKE $2 
+                     OR phone_number ILIKE $2 
+                     OR job_title ILIKE $2
+                 )
+                 ORDER BY last_name ASC, first_name ASC",
+            )
+            .bind(organization_uuid)
+            .bind(&search_pattern)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, first_name, last_name, email, phone_number, 
+                 user_id, salutation, job_title, department, company_name, fax_number, 
+                 website_url, gender, created_at, updated_at 
+                 FROM module_crm_customers 
+                 WHERE organization_uuid = ?1 
+                 AND (
+                     first_name LIKE ?2 
+                     OR last_name LIKE ?2 
+                     OR email LIKE ?2 
+                     OR company_name LIKE ?2 
+                     OR phone_number LIKE ?2 
+                     OR job_title LIKE ?2
+                 )
+                 ORDER BY last_name ASC, first_name ASC",
+            )
+            .bind(organization_uuid)
+            .bind(&search_pattern)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomer {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    first_name: row.get("first_name"),
+                    last_name: row.get("last_name"),
+                    email: row.get::<Option<String>, _>("email"),
+                    phone_number: row.get::<Option<String>, _>("phone_number"),
+                    user_id: row.get::<Option<String>, _>("user_id"),
+                    salutation: row.get::<Option<String>, _>("salutation"),
+                    job_title: row.get::<Option<String>, _>("job_title"),
+                    department: row.get::<Option<String>, _>("department"),
+                    company_name: row.get::<Option<String>, _>("company_name"),
+                    fax_number: row.get::<Option<String>, _>("fax_number"),
+                    website_url: row.get::<Option<String>, _>("website_url"),
+                    gender: row.get::<Option<String>, _>("gender"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+                })
+                .collect())
+        }
+    }
+}
+

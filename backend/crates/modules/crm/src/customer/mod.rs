@@ -282,5 +282,25 @@ impl CrmCustomer {
     ) -> Result<(), CrmCustomerDatabaseError> {
         database::delete_customer(pool, &self.uuid).await
     }
+
+    /// Search customers by query string
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `organization_uuid` - UUID of the organization to search customers in
+    /// * `query` - Search query string (searches in first_name, last_name, email, company_name, phone_number, job_title)
+    ///
+    /// # Returns
+    /// Returns a vector of `CrmCustomer` matching the search query
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if the database query fails
+    pub async fn search_customers(
+        pool: &flextide_core::database::DatabasePool,
+        organization_uuid: &str,
+        query: &str,
+    ) -> Result<Vec<CrmCustomer>, CrmCustomerDatabaseError> {
+        database::search_customers(pool, organization_uuid, query).await
+    }
 }
 

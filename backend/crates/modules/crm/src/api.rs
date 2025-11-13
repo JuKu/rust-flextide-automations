@@ -3,12 +3,13 @@
 //! Provides REST API endpoints for managing CRM customers, notes, and addresses.
 
 use axum::{
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::StatusCode,
     response::{IntoResponse, Json},
-    routing::{delete, post},
+    routing::{delete, get, post},
     Router,
 };
+use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 
 use crate::customer::{
@@ -98,7 +99,7 @@ pub async fn create_customer(
 
 /// Delete a customer by UUID
 ///
-/// DELETE /api/modules/crm/customers/:uuid
+/// DELETE /api/modules/crm/customers/{uuid}
 pub async fn delete_customer(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
@@ -179,7 +180,7 @@ pub async fn delete_customer(
 
 /// Add a note to a customer
 ///
-/// POST /api/modules/crm/customers/:uuid/notes
+/// POST /api/modules/crm/customers/{uuid}/notes
 pub async fn add_customer_note(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
@@ -262,7 +263,7 @@ pub async fn add_customer_note(
 
 /// Delete a note from a customer
 ///
-/// DELETE /api/modules/crm/customers/:uuid/notes/:note_uuid
+/// DELETE /api/modules/crm/customers/{uuid}/notes/{note_uuid}
 pub async fn delete_customer_note(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
@@ -343,7 +344,7 @@ pub async fn delete_customer_note(
 
 /// Add an address to a customer
 ///
-/// POST /api/modules/crm/customers/:uuid/addresses
+/// POST /api/modules/crm/customers/{uuid}/addresses
 pub async fn add_customer_address(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
@@ -426,7 +427,7 @@ pub async fn add_customer_address(
 
 /// Delete an address from a customer
 ///
-/// DELETE /api/modules/crm/customers/:uuid/addresses/:address_uuid
+/// DELETE /api/modules/crm/customers/{uuid}/addresses/{address_uuid}
 pub async fn delete_customer_address(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
@@ -505,6 +506,97 @@ pub async fn delete_customer_address(
     })))
 }
 
+/// Query parameters for customer search
+#[derive(Debug, Deserialize)]
+pub struct SearchCustomersQuery {
+    pub q: String,
+}
+
+/// Search customers
+///
+/// GET /api/modules/crm/customers/search?q=<query>
+pub async fn search_customers(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Query(params): Query<SearchCustomersQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_search_customers")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to search customers" })),
+        ));
+    }
+
+    // Validate query
+    if params.q.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Search query cannot be empty" })),
+        ));
+    }
+
+    // Search customers
+    let customers = CrmCustomer::search_customers(&pool, &org_uuid, &params.q)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error searching customers: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to search customers" })),
+            )
+        })?;
+
+    // Convert to response format (matching the frontend Customer type)
+    let customer_responses: Vec<serde_json::Value> = customers
+        .into_iter()
+        .map(|c| {
+            json!({
+                "id": c.uuid,
+                "name": format!("{} {}", c.first_name, c.last_name),
+                "email": c.email.unwrap_or_default(),
+                "company": c.company_name,
+                "status": "", // TODO: Add status field if needed
+                "created_at": c.created_at.to_rfc3339(),
+                "last_contact": None::<String>, // TODO: Add last_contact if needed
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "customers": customer_responses
+    })))
+}
+
 /// Create the API router for CRM endpoints
 pub fn create_api_router<S>() -> Router<S>
 where
@@ -512,15 +604,16 @@ where
 {
     Router::new()
         .route("/modules/crm/customers", post(create_customer))
-        .route("/modules/crm/customers/:uuid", delete(delete_customer))
-        .route("/modules/crm/customers/:uuid/notes", post(add_customer_note))
+        .route("/modules/crm/customers/search", get(search_customers))
+        .route("/modules/crm/customers/{uuid}", delete(delete_customer))
+        .route("/modules/crm/customers/{uuid}/notes", post(add_customer_note))
         .route(
-            "/modules/crm/customers/:uuid/notes/:note_uuid",
+            "/modules/crm/customers/{uuid}/notes/{note_uuid}",
             delete(delete_customer_note),
         )
-        .route("/modules/crm/customers/:uuid/addresses", post(add_customer_address))
+        .route("/modules/crm/customers/{uuid}/addresses", post(add_customer_address))
         .route(
-            "/modules/crm/customers/:uuid/addresses/:address_uuid",
+            "/modules/crm/customers/{uuid}/addresses/{address_uuid}",
             delete(delete_customer_address),
         )
 }

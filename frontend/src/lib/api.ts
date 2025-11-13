@@ -395,3 +395,86 @@ export async function getCrmClosedDeals(): Promise<CrmClosedDealsResponse> {
   return response.json();
 }
 
+export interface CreateCrmCustomerRequest {
+  first_name: string;
+  last_name: string;
+  email?: string;
+  phone_number?: string;
+  user_id?: string;
+  salutation?: string;
+  job_title?: string;
+  department?: string;
+  company_name?: string;
+  fax_number?: string;
+  website_url?: string;
+  gender?: string;
+}
+
+export interface CreateCrmCustomerResponse {
+  uuid: string;
+  message: string;
+}
+
+export async function createCrmCustomer(
+  request: CreateCrmCustomerRequest
+): Promise<CreateCrmCustomerResponse> {
+  try {
+    const response = await fetch(
+      getApiEndpoint('/api/modules/crm/customers'),
+      {
+        method: 'POST',
+        headers: getApiHeaders('/api/modules/crm/customers'),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        throw new Error(error.error || 'Failed to create customer');
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to create customer');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Failed to create customer:', error);
+    throw error;
+  }
+}
+
+export async function searchCrmCustomers(
+  query: string
+): Promise<CrmCustomersResponse> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/crm/customers/search?q=${encodeURIComponent(query)}`),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/modules/crm/customers/search'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        throw new Error(error.error || 'Failed to search customers');
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to search customers');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Failed to search customers:', error);
+    throw error;
+  }
+}
+

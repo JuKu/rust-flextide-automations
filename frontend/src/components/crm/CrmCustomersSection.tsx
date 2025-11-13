@@ -6,13 +6,16 @@ import { CrmCustomer } from "@/lib/api";
 interface CrmCustomersSectionProps {
   customers: CrmCustomer[];
   onCreateCustomer?: () => void;
+  onSearch?: (query: string) => void;
 }
 
 export function CrmCustomersSection({
   customers,
   onCreateCustomer,
+  onSearch,
 }: CrmCustomersSectionProps) {
   const [filterOpen, setFilterOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "—";
@@ -53,6 +56,36 @@ export function CrmCustomersSection({
           Customers
         </h2>
         <div className="flex items-center gap-2">
+          {/* Search Input */}
+          {onSearch && (
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search customers..."
+                value={searchQuery}
+                onChange={(e) => {
+                  const query = e.target.value;
+                  setSearchQuery(query);
+                  onSearch(query);
+                }}
+                className="w-64 px-3 py-1.5 pl-9 text-sm rounded-md border border-flextide-neutral-border bg-flextide-neutral-panel-bg text-flextide-neutral-text-dark placeholder-flextide-neutral-text-medium focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent"
+              />
+              <svg
+                className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-flextide-neutral-text-medium"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </div>
+          )}
+
           {/* Filter Button */}
           <button
             onClick={() => setFilterOpen(!filterOpen)}

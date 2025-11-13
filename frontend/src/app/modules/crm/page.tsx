@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CrmKpiCards } from "@/components/crm/CrmKpiCards";
 import { CrmCustomersSection } from "@/components/crm/CrmCustomersSection";
+import { CreateCustomerDialog } from "@/components/crm/CreateCustomerDialog";
 import { PieChart } from "@/components/common/PieChart";
 import { LineChart } from "@/components/common/LineChart";
 import {
@@ -12,6 +13,7 @@ import {
   getCrmSalesPipelineChart,
   getCrmCountriesChart,
   getCrmClosedDeals,
+  searchCrmCustomers,
   type CrmKpiResponse,
   type CrmCustomer,
   type CrmPipelineStatus,
@@ -22,11 +24,14 @@ import {
 export default function CrmPage() {
   const [kpis, setKpis] = useState<CrmKpiResponse | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
+  const [allCustomers, setAllCustomers] = useState<CrmCustomer[]>([]);
   const [pipelineData, setPipelineData] = useState<CrmPipelineStatus[]>([]);
   const [countriesData, setCountriesData] = useState<CrmCountryData[]>([]);
   const [closedDealsData, setClosedDealsData] = useState<CrmClosedDealData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -45,6 +50,7 @@ export default function CrmPage() {
 
         setKpis(kpisData);
         setCustomers(customersData.customers);
+        setAllCustomers(customersData.customers);
         setPipelineData(pipelineData.statuses);
         setCountriesData(countriesData.countries);
         setClosedDealsData(closedDealsData.deals);
@@ -60,9 +66,55 @@ export default function CrmPage() {
   }, []);
 
   const handleCreateCustomer = () => {
-    // TODO: Implement customer creation
-    console.log("Create customer");
+    setIsCreateDialogOpen(true);
   };
+
+  const handleCustomerCreated = async () => {
+    // Refresh customers list
+    try {
+      const customersData = await getCrmCustomers();
+      setCustomers(customersData.customers);
+      setAllCustomers(customersData.customers);
+    } catch (err) {
+      console.error("Failed to refresh customers:", err);
+    }
+  };
+
+  const handleSearch = async (query: string) => {
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    // If query is empty, show all customers
+    if (!query.trim()) {
+      setCustomers(allCustomers);
+      return;
+    }
+
+    // Debounce search API calls
+    const timeout = setTimeout(async () => {
+      try {
+        const searchResults = await searchCrmCustomers(query.trim());
+        setCustomers(searchResults.customers);
+      } catch (err) {
+        console.error("Failed to search customers:", err);
+        // On error, show all customers
+        setCustomers(allCustomers);
+      }
+    }, 300); // 300ms debounce
+
+    setSearchTimeout(timeout);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
+  }, [searchTimeout]);
 
   if (loading) {
     return (
@@ -144,8 +196,16 @@ export default function CrmPage() {
           <CrmCustomersSection
             customers={customers}
             onCreateCustomer={handleCreateCustomer}
+            onSearch={handleSearch}
           />
         </div>
+
+        {/* Create Customer Dialog */}
+        <CreateCustomerDialog
+          isOpen={isCreateDialogOpen}
+          onClose={() => setIsCreateDialogOpen(false)}
+          onSuccess={handleCustomerCreated}
+        />
 
         {/* Third Row: Charts (3 columns) */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
