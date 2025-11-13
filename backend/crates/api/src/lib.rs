@@ -10,6 +10,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sqlx::Row;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -171,12 +172,13 @@ pub async fn organization_middleware(
         return next.run(request).await;
     }
 
-    // Skip for login, register, health, logout, and organizations/list-own endpoints
+    // Skip for login, register, health, logout, organizations/list-own, and organizations/create endpoints
     if path == "/api/login"
         || path == "/api/register"
         || path == "/api/health"
         || path == "/api/logout"
         || path == "/api/organizations/list-own"
+        || path == "/api/organizations/create"
     {
         tracing::debug!("[Org] Skipping organization check for endpoint: {}", path);
         return next.run(request).await;
@@ -320,6 +322,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/register", post(register))
         .route("/api/logout", post(logout))
         .route("/api/organizations/list-own", get(list_own_organizations))
+        .route("/api/organizations/create", post(create_organization))
         .route("/api/permissions", get(get_permissions))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .nest("/api", flextide_modules_crm::create_router())
@@ -588,6 +591,253 @@ pub async fn list_own_organizations(
         .collect();
 
     Ok(Json(result))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+}
+
+/// Create a new organization and make the current user the owner
+///
+/// POST /api/organizations/create
+/// Creates a new organization with the given name and adds the current user as owner.
+/// Returns an error if the user already has 50 or more organizations.
+pub async fn create_organization(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(payload): Json<CreateOrganizationRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::database::DatabasePool;
+    use uuid::Uuid;
+
+    // Validate organization name
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Organization name cannot be empty" })),
+        ));
+    }
+
+    if name.len() > 255 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Organization name cannot exceed 255 characters" })),
+        ));
+    }
+
+    // Check if user already has 50 or more organizations
+    let count: i64 = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = $1")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?1")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+    };
+
+    if count >= 50 {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "You cannot have more than 50 organizations" })),
+        ));
+    }
+
+    // Generate organization UUID
+    let org_uuid = Uuid::new_v4().to_string();
+
+    // Create organization in a transaction
+    match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?, ?, ?)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+        DatabasePool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES ($1, $2, $3)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+        DatabasePool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?1, ?2, ?3)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?1, ?2, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+    }
+
+    tracing::info!(
+        "Organization '{}' created successfully with UUID {} for user {}",
+        name,
+        org_uuid,
+        claims.user_uuid
+    );
+
+    Ok(Json(json!({
+        "uuid": org_uuid,
+        "name": name,
+        "is_admin": true,
+        "license": "Free"
+    })))
 }
 
 /// Get all permissions for the current user in the current organization

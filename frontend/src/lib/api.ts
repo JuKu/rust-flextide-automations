@@ -73,12 +73,13 @@ function getApiHeaders(path: string): Record<string, string> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Add organization UUID header for all requests except login, register, logout, and organizations/list-own
+  // Add organization UUID header for all requests except login, register, logout, organizations/list-own, and organizations/create
   const isAuthEndpoint = path === '/api/login' || path === '/api/register';
   const isLogoutEndpoint = path === '/api/logout';
   const isOrgListEndpoint = path === '/api/organizations/list-own';
+  const isOrgCreateEndpoint = path === '/api/organizations/create';
   
-  if (!isAuthEndpoint && !isLogoutEndpoint && !isOrgListEndpoint) {
+  if (!isAuthEndpoint && !isLogoutEndpoint && !isOrgListEndpoint && !isOrgCreateEndpoint) {
     const orgUuid = getCurrentOrganizationUuid();
     if (!orgUuid) {
       console.warn(`[API] Missing organization UUID for request to ${path}. Organization may not be selected yet.`);
@@ -228,6 +229,57 @@ export async function listOwnOrganizations(): Promise<Organization[]> {
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to fetch organizations:', error);
+    throw error;
+  }
+}
+
+export interface CreateOrganizationRequest {
+  name: string;
+}
+
+/**
+ * Create a new organization
+ */
+export async function createOrganization(request: CreateOrganizationRequest): Promise<Organization> {
+  try {
+    const headers = getApiHeaders('/api/organizations/create');
+    
+    // Ensure we have a token before making the request
+    if (!headers['Authorization']) {
+      throw new Error('Not authenticated. Please log in again.');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/organizations/create'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        throw new Error(error.error || 'Failed to create organization');
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to create organization');
+      }
+    }
+
+    const data = await response.json();
+    // Map backend response to Organization interface
+    return {
+      uuid: data.uuid,
+      title: data.name,
+      is_admin: data.is_admin,
+      license: data.license || 'Free',
+    };
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create organization:', error);
     throw error;
   }
 }

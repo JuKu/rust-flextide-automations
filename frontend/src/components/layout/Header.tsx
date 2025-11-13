@@ -8,6 +8,7 @@ import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
 import { removeToken, getTokenPayload, isServerAdmin, isAuthenticated } from "@/lib/auth";
 import { getCurrentOrganizationUuid, setCurrentOrganizationUuid } from "@/lib/organization";
 import { useTheme } from "@/components/common/ThemeProvider";
+import { CreateOrganizationDialog } from "@/components/organization/CreateOrganizationDialog";
 
 function getLicenseColorClass(license: string): string {
   switch (license) {
@@ -78,6 +79,7 @@ export function Header() {
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [userInitial, setUserInitial] = useState<string>("U");
   const initializedRef = useRef(false);
+  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
 
   // Get user initial on client side only
   useEffect(() => {
@@ -367,16 +369,21 @@ export function Header() {
               </svg>
             </button>
 
-            {orgMenuOpen && organizations.length > 0 && (
+            {orgMenuOpen && (
               <div className="absolute right-0 mt-1 w-56 rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border shadow-lg py-1 z-50">
                 {organizations.map((org) => (
                   <button
                     key={org.uuid}
                     onClick={() => {
-                      setCurrentOrgUuid(org.uuid);
-                      setCurrentOrganizationUuid(org.uuid);
-                      setOrgMenuOpen(false);
-                      // TODO: In production, switch organization via API
+                      if (org.uuid !== currentOrgUuid) {
+                        setCurrentOrgUuid(org.uuid);
+                        setCurrentOrganizationUuid(org.uuid);
+                        setOrgMenuOpen(false);
+                        // Reload page to refresh all data for the new organization
+                        window.location.reload();
+                      } else {
+                        setOrgMenuOpen(false);
+                      }
                     }}
                     className={`block w-full text-left px-4 py-2 text-sm transition-colors ${
                       org.uuid === currentOrgUuid
@@ -397,6 +404,29 @@ export function Header() {
                     </div>
                   </button>
                 ))}
+                <div className="border-t border-flextide-neutral-border my-1"></div>
+                <button
+                  onClick={() => {
+                    setOrgMenuOpen(false);
+                    setIsCreateOrgDialogOpen(true);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg transition-colors flex items-center gap-2"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                  Create New Organization
+                </button>
               </div>
             )}
           </div>
@@ -442,6 +472,18 @@ export function Header() {
           </div>
         </div>
       </div>
+
+      <CreateOrganizationDialog
+        isOpen={isCreateOrgDialogOpen}
+        onClose={() => setIsCreateOrgDialogOpen(false)}
+        onSuccess={async (newOrg) => {
+          // Switch to the newly created organization
+          setCurrentOrgUuid(newOrg.uuid);
+          setCurrentOrganizationUuid(newOrg.uuid);
+          // Reload page to refresh all data for the new organization
+          window.location.reload();
+        }}
+      />
     </header>
   );
 }
