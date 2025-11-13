@@ -268,3 +268,130 @@ export async function editWorkflowTitle(
   }
 }
 
+// CRM API types and functions
+export interface CrmKpiResponse {
+  total_sales_this_month: number;
+  orders_this_month: number;
+  orders_last_month: number;
+  win_rate_this_month: number;
+  avg_days_to_close: number;
+  total_users: number;
+  open_deals: number;
+}
+
+export interface CrmCustomer {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  status: string;
+  created_at: string;
+  last_contact: string | null;
+}
+
+export interface CrmCustomersResponse {
+  customers: CrmCustomer[];
+}
+
+export interface CrmPipelineStatus {
+  status: string;
+  count: number;
+}
+
+export interface CrmSalesPipelineChartResponse {
+  statuses: CrmPipelineStatus[];
+}
+
+export interface CrmCountryData {
+  country: string;
+  count: number;
+}
+
+export interface CrmCountriesChartResponse {
+  countries: CrmCountryData[];
+}
+
+export interface CrmClosedDealData {
+  month: string;
+  current_year: number;
+  previous_year: number;
+}
+
+export interface CrmClosedDealsResponse {
+  deals: CrmClosedDealData[];
+}
+
+export async function getCrmKpis(): Promise<CrmKpiResponse> {
+  const response = await fetch(getApiEndpoint('/api/modules/crm/kpis'), {
+    method: 'GET',
+    headers: getApiHeaders('/api/modules/crm/kpis'),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch CRM KPIs');
+  }
+
+  return response.json();
+}
+
+export async function getCrmCustomers(): Promise<CrmCustomersResponse> {
+  const response = await fetch(getApiEndpoint('/api/modules/crm/customers'), {
+    method: 'GET',
+    headers: getApiHeaders('/api/modules/crm/customers'),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch CRM customers');
+  }
+
+  return response.json();
+}
+
+export async function getCrmSalesPipelineChart(): Promise<CrmSalesPipelineChartResponse> {
+  const response = await fetch(
+    getApiEndpoint('/api/modules/crm/sales-pipeline-chart'),
+    {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/sales-pipeline-chart'),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch sales pipeline chart data');
+  }
+
+  return response.json();
+}
+
+export async function getCrmCountriesChart(): Promise<CrmCountriesChartResponse> {
+  const response = await fetch(
+    getApiEndpoint('/api/modules/crm/countries-chart'),
+    {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/countries-chart'),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch countries chart data');
+  }
+
+  return response.json();
+}
+
+export async function getCrmClosedDeals(): Promise<CrmClosedDealsResponse> {
+  const response = await fetch(
+    getApiEndpoint('/api/modules/crm/closed-deals'),
+    {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/closed-deals'),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch closed deals data');
+  }
+
+  return response.json();
+}
+

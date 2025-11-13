@@ -323,6 +323,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/logout", post(logout))
         .route("/api/organizations/list-own", get(list_own_organizations))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
+        .nest("/api", flextide_modules_crm::create_router())
         .layer(
             ServiceBuilder::new()
                 .layer(cors)
