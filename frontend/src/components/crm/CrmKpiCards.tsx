@@ -40,7 +40,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 mb-6">
       {/* Total Sales this Month */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-primary-accent p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Total Sales this Month
         </div>
@@ -50,7 +50,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
       </div>
 
       {/* Orders this Month */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-secondary-teal p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Orders this Month
         </div>
@@ -68,7 +68,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
       </div>
 
       {/* Win Rate this Month */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-success p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Win Rate this Month
         </div>
@@ -78,7 +78,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
       </div>
 
       {/* Avg. days to Close */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-warning p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Avg. days to Close
         </div>
@@ -88,7 +88,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
       </div>
 
       {/* Total users in CRM system */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-secondary-purple p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Total users in CRM system
         </div>
@@ -98,7 +98,7 @@ export function CrmKpiCards({ kpis }: CrmKpiCardsProps) {
       </div>
 
       {/* Open Deals */}
-      <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 shadow-sm">
+      <div className="rounded-lg bg-flextide-neutral-panel-bg border-2 border-flextide-info p-6 shadow-sm">
         <div className="text-sm text-flextide-neutral-text-medium mb-1">
           Open Deals
         </div>
