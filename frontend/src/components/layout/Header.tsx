@@ -36,7 +36,13 @@ const menuItems: MenuItem[] = [
   { label: "Workflows", href: "/workflows" },
   { label: "Executions", href: "/executions" },
   { label: "Services", href: "/services" },
-  { label: "Modules", href: "/modules" },
+  {
+    label: "Modules",
+    href: "/modules",
+    children: [
+      { label: "CRM", href: "/modules/crm" },
+    ],
+  },
   { label: "Marketplace", href: "/marketplace" },
   {
     label: "Organization",
