@@ -23,6 +23,7 @@ resolver = "3"
 
 [dependencies]
 api = { path = "crates/api" }
+flextide_core = { path = "crates/flextide-core", package = "flextide-core" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -56,5 +57,8 @@ tracing = "0.1"
 # Test dependencies
 [dev-dependencies]
 api = { path = "crates/api" }
+flextide_core = { path = "crates/flextide-core", package = "flextide-core" }
 axum-test = "18.2.1"
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
+uuid = { version = "1.10", features = ["v4", "v5"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "sqlite"] }

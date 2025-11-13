@@ -19,6 +19,7 @@ use tower_http::{
 #[derive(Clone)]
 pub struct AppState {
     pub jwt_secret: String,
+    pub db_pool: flextide_core::database::DatabasePool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,12 +328,9 @@ pub fn create_app(state: AppState) -> Router {
                 .layer(cors)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    organization_middleware,
-                ))
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
                     auth_middleware,
                 ))
+                .layer(axum::middleware::from_fn(organization_middleware))
                 .layer(trace_layer)
         )
         .with_state(state)
@@ -346,11 +344,47 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Temporary: accept only admin@example.com / admin
-    if payload.email != "admin@example.com" || payload.password != "admin" {
+    // Get user from database by email
+    let user = match flextide_core::user::get_user_by_email(&state.db_pool, &payload.email).await {
+        Ok(user) => user,
+        Err(flextide_core::user::UserDatabaseError::Sql(sqlx::Error::RowNotFound)) => {
+            // User not found - return generic error to avoid email enumeration
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "Invalid email or password" })),
+            ));
+        }
+        Err(e) => {
+            tracing::error!("Database error during login: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Internal server error" })),
+            ));
+        }
+    };
+
+    // Verify password
+    let password_valid = flextide_core::user::verify_password(&payload.password, &user.password_hash)
+        .map_err(|e| {
+            tracing::error!("Password verification error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Internal server error" })),
+            )
+        })?;
+
+    if !password_valid {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "Invalid email or password" })),
+        ));
+    }
+
+    // Check if account is activated
+    if !user.activated {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Account is not activated" })),
         ));
     }
 
@@ -359,16 +393,12 @@ pub async fn login(
     let exp = (now + Duration::hours(24)).timestamp() as usize;
     let iat = now.timestamp() as usize;
 
-    // Generate a UUID for the user (in production, get from database)
-    // For now, use a deterministic UUID based on email hash
-    let user_uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, payload.email.as_bytes()).to_string();
-
     // Set server admin status (admin@example.com is server admin)
     let is_server_admin = payload.email == "admin@example.com";
 
     let claims = Claims {
         sub: payload.email.clone(),
-        user_uuid: user_uuid.clone(),
+        user_uuid: user.uuid.clone(),
         exp,
         iat,
         is_server_admin,

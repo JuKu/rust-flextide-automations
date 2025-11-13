@@ -168,3 +168,6 @@ $RECYCLE.BIN/
 
 backend/.env
 !backend/.env.sample
+
+# sqlx cache (generated files, not needed in version control)
+backend/migrations/.sqlx/

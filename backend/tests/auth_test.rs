@@ -7,7 +7,7 @@ use api::Claims;
 
 #[tokio::test]
 async fn test_login_success() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -39,7 +39,7 @@ async fn test_login_success() {
 
 #[tokio::test]
 async fn test_login_invalid_email() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -58,7 +58,7 @@ async fn test_login_invalid_email() {
 
 #[tokio::test]
 async fn test_login_invalid_password() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -77,7 +77,7 @@ async fn test_login_invalid_password() {
 
 #[tokio::test]
 async fn test_login_missing_fields() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -87,12 +87,13 @@ async fn test_login_missing_fields() {
         }))
         .await;
 
-    response.assert_status_bad_request();
+    // Axum returns 422 (Unprocessable Entity) for JSON deserialization failures
+    assert_eq!(response.status_code(), 422);
 }
 
 #[tokio::test]
 async fn test_register_success() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -124,7 +125,7 @@ async fn test_register_success() {
 
 #[tokio::test]
 async fn test_register_missing_fields() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server
@@ -134,12 +135,13 @@ async fn test_register_missing_fields() {
         }))
         .await;
 
-    response.assert_status_bad_request();
+    // Axum returns 422 (Unprocessable Entity) for JSON deserialization failures
+    assert_eq!(response.status_code(), 422);
 }
 
 #[tokio::test]
 async fn test_health_check() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let server = TestServer::new(app).unwrap();
 
     let response = server.get("/api/health").await;

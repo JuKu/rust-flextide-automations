@@ -20,6 +20,7 @@ Root:
     worker.rs
   /migrations
     SQLx migrations for MySQL & PostgreSQL
+    Migration files follow pattern: {timestamp}_{description}.sql
   Cargo.toml (workspace root)
 
 /frontend
