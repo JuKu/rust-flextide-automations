@@ -1,3 +1,5 @@
+mod customer;
+
 use axum::{
     extract::Extension,
     http::StatusCode,
@@ -8,6 +10,11 @@ use axum::{
 use chrono::{Datelike, Utc};
 use serde::Serialize;
 use serde_json::json;
+
+pub use customer::{
+    CrmCustomer, CrmCustomerAddress, CrmCustomerNote, CreateCrmCustomerAddressRequest,
+    CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest,
+};
 
 pub fn create_router<S>() -> Router<S>
 where

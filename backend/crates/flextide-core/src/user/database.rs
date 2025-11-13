@@ -220,3 +220,63 @@ pub async fn ensure_default_admin_user(pool: &DatabasePool) -> Result<(), UserDa
     Ok(())
 }
 
+/// Check if a user belongs to a specific organization
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `user_uuid` - UUID of the user to check
+/// * `organization_uuid` - UUID of the organization to check
+///
+/// # Returns
+/// Returns `true` if the user belongs to the organization, `false` otherwise
+///
+/// # Errors
+/// Returns `UserDatabaseError` if the database query fails
+pub async fn user_belongs_to_organization(
+    pool: &DatabasePool,
+    user_uuid: &str,
+    organization_uuid: &str,
+) -> Result<bool, UserDatabaseError> {
+    match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM organization_members 
+                 WHERE user_id = ? AND org_id = ?",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM organization_members 
+                 WHERE user_id = $1 AND org_id = $2",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM organization_members 
+                 WHERE user_id = ?1 AND org_id = ?2",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+    }
+}
+
