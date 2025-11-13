@@ -1,3 +1,4 @@
+mod api;
 mod customer;
 
 use axum::{
@@ -26,6 +27,7 @@ where
         .route("/modules/crm/sales-pipeline-chart", get(get_sales_pipeline_chart))
         .route("/modules/crm/countries-chart", get(get_countries_chart))
         .route("/modules/crm/closed-deals", get(get_closed_deals))
+        .merge(api::create_api_router())
 }
 
 #[derive(Debug, Serialize)]

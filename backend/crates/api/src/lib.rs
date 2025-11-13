@@ -22,14 +22,8 @@ pub struct AppState {
     pub db_pool: flextide_core::database::DatabasePool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String, // email
-    pub user_uuid: String, // user UUID
-    pub exp: usize,
-    pub iat: usize,
-    pub is_server_admin: bool,
-}
+// Re-export Claims from flextide-core for convenience
+pub use flextide_core::jwt::Claims;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -164,6 +158,7 @@ pub async fn auth_middleware(
 
 /// Organization check middleware - validates user belongs to organization
 pub async fn organization_middleware(
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -262,6 +257,9 @@ pub async fn organization_middleware(
 
     // Attach organization UUID to request extensions
     request.extensions_mut().insert(org_uuid_string);
+    
+    // Attach database pool to request extensions for use in handlers
+    request.extensions_mut().insert(state.db_pool.clone());
 
     next.run(request).await
 }
@@ -331,7 +329,10 @@ pub fn create_app(state: AppState) -> Router {
                     state.clone(),
                     auth_middleware,
                 ))
-                .layer(axum::middleware::from_fn(organization_middleware))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    organization_middleware,
+                ))
                 .layer(trace_layer)
         )
         .with_state(state)

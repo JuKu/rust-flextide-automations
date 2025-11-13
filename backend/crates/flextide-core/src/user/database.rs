@@ -46,6 +46,34 @@ pub async fn has_any_users(pool: &DatabasePool) -> Result<bool, UserDatabaseErro
     Ok(count > 0)
 }
 
+/// Check if a user has a specific permission for an organization
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `user_uuid` - UUID of the user to check
+/// * `organization_uuid` - UUID of the organization
+/// * `permission` - Permission string to check (e.g., "can_delete_customers")
+///
+/// # Returns
+/// Returns `true` if the user has the permission, `false` otherwise
+///
+/// # Errors
+/// Returns `UserDatabaseError` if the database query fails
+///
+/// # Note
+/// This is currently a mock implementation that always returns `true`.
+/// A database table for permissions will be created later.
+pub async fn user_has_permission(
+    _pool: &DatabasePool,
+    _user_uuid: &str,
+    _organization_uuid: &str,
+    _permission: &str,
+) -> Result<bool, UserDatabaseError> {
+    // TODO: Implement actual permission check from database
+    // For now, mock implementation always returns true
+    Ok(true)
+}
+
 /// Get a user by email from the database
 ///
 /// # Errors
