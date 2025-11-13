@@ -44,6 +44,25 @@ CREATE TABLE IF NOT EXISTS module_crm_customer_notes (
 );
 
 -- ============================================================================
+-- MODULE_CRM_CUSTOMER_ADDRESSES TABLE
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS module_crm_customer_addresses (
+    uuid CHAR(36) NOT NULL PRIMARY KEY,
+    customer_uuid CHAR(36) NOT NULL,
+    address_type VARCHAR(50) NOT NULL,
+    street VARCHAR(255),
+    city VARCHAR(255),
+    state_province VARCHAR(255),
+    postal_code VARCHAR(50),
+    country VARCHAR(100),
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_uuid) REFERENCES module_crm_customers(uuid) ON DELETE CASCADE
+);
+
+-- ============================================================================
 -- INDEXES
 -- ============================================================================
 
@@ -58,4 +77,9 @@ CREATE INDEX IF NOT EXISTS idx_module_crm_customers_created_at ON module_crm_cus
 CREATE INDEX IF NOT EXISTS idx_module_crm_customer_notes_customer ON module_crm_customer_notes(customer_uuid);
 CREATE INDEX IF NOT EXISTS idx_module_crm_customer_notes_author ON module_crm_customer_notes(author_id);
 CREATE INDEX IF NOT EXISTS idx_module_crm_customer_notes_created_at ON module_crm_customer_notes(created_at);
+
+-- Indexes on module_crm_customer_addresses for efficient queries
+CREATE INDEX IF NOT EXISTS idx_module_crm_customer_addresses_customer ON module_crm_customer_addresses(customer_uuid);
+CREATE INDEX IF NOT EXISTS idx_module_crm_customer_addresses_type ON module_crm_customer_addresses(address_type);
+CREATE INDEX IF NOT EXISTS idx_module_crm_customer_addresses_primary ON module_crm_customer_addresses(is_primary);
 
