@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Request, State},
+    extract::{Extension, Path, Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Response},
@@ -520,43 +520,73 @@ where
 }
 
 pub async fn list_own_organizations(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<Organization>>, (StatusCode, Json<Value>)> {
-    // Mock data - in production, fetch from database
-    let organizations = vec![
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "My Organization".to_string(),
-            is_admin: true,
-            license: License::ProPlus,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Another Org".to_string(),
-            is_admin: true,
-            license: License::Team,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org".to_string(),
-            is_admin: true,
-            license: License::Pro,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org 2".to_string(),
-            is_admin: false,
-            license: License::Free,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org 3".to_string(),
-            is_admin: false,
-            license: License::Pro,
-        },
-    ];
+    use flextide_core::database::DatabasePool;
+    
+    let organizations = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = ?
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = $1
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = ?1
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+    }
+    .map_err(|e| {
+        tracing::error!("Failed to fetch organizations for user {}: {}", claims.user_uuid, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to fetch organizations" })),
+        )
+    })?;
 
-    Ok(Json(organizations))
+    let result: Vec<Organization> = organizations
+        .into_iter()
+        .map(|(uuid, name, role)| {
+            // User is admin if role is 'admin' or 'owner'
+            let is_admin = role == "admin" || role == "owner";
+            // TODO: Add license field to organizations table, defaulting to Free for now
+            Organization {
+                uuid,
+                title: name,
+                is_admin,
+                license: License::Free,
+            }
+        })
+        .collect();
+
+    Ok(Json(result))
 }
 
 #[derive(Debug, Deserialize)]

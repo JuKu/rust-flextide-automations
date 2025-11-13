@@ -31,12 +31,7 @@ pub async fn create_test_app() -> axum::Router {
     .await
     .expect("Failed to create users table");
     
-    // Ensure default admin user exists for tests
-    flextide_core::user::ensure_default_admin_user(&db_pool)
-        .await
-        .expect("Failed to create default admin user");
-    
-    // Create organizations table for tests
+    // Create organizations table for tests (must be created before organization_members)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS organizations (
             uuid CHAR(36) NOT NULL PRIMARY KEY,
@@ -53,7 +48,7 @@ pub async fn create_test_app() -> axum::Router {
     .await
     .expect("Failed to create organizations table");
     
-    // Create organization_members table for tests
+    // Create organization_members table for tests (must be created before ensure_default_admin_user)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS organization_members (
             org_id CHAR(36) NOT NULL,
@@ -69,6 +64,11 @@ pub async fn create_test_app() -> axum::Router {
     })
     .await
     .expect("Failed to create organization_members table");
+    
+    // Ensure default admin user exists for tests (must be called after all tables are created)
+    flextide_core::user::ensure_default_admin_user(&db_pool)
+        .await
+        .expect("Failed to create default admin user");
     
     // Create CRM tables for tests
     sqlx::query(
@@ -179,12 +179,7 @@ pub async fn create_test_app_with_org() -> (axum::Router, String, String, String
     .await
     .expect("Failed to create users table");
     
-    // Ensure default admin user exists for tests
-    flextide_core::user::ensure_default_admin_user(&db_pool)
-        .await
-        .expect("Failed to create default admin user");
-    
-    // Create organizations table for tests
+    // Create organizations table for tests (must be created before organization_members)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS organizations (
             uuid CHAR(36) NOT NULL PRIMARY KEY,
@@ -201,7 +196,7 @@ pub async fn create_test_app_with_org() -> (axum::Router, String, String, String
     .await
     .expect("Failed to create organizations table");
     
-    // Create organization_members table for tests
+    // Create organization_members table for tests (must be created before ensure_default_admin_user)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS organization_members (
             org_id CHAR(36) NOT NULL,
@@ -217,6 +212,11 @@ pub async fn create_test_app_with_org() -> (axum::Router, String, String, String
     })
     .await
     .expect("Failed to create organization_members table");
+    
+    // Ensure default admin user exists for tests (must be called after all tables are created)
+    flextide_core::user::ensure_default_admin_user(&db_pool)
+        .await
+        .expect("Failed to create default admin user");
     
     // Create CRM tables for tests
     sqlx::query(

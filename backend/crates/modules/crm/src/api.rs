@@ -45,17 +45,40 @@ pub async fn create_customer(
     }
 
     // Check if user belongs to organization
+    tracing::debug!(
+        "[CRM create_customer] Checking organization membership: user_uuid={}, org_uuid={}",
+        claims.user_uuid,
+        org_uuid
+    );
+    
     let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
         .await
         .map_err(|e| {
-            tracing::error!("Database error checking organization membership: {}", e);
+            tracing::error!(
+                "[CRM create_customer] Database error checking organization membership: user_uuid={}, org_uuid={}, error={}",
+                claims.user_uuid,
+                org_uuid,
+                e
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": "Database error" })),
             )
         })?;
 
+    tracing::debug!(
+        "[CRM create_customer] Organization membership check result: user_uuid={}, org_uuid={}, belongs={}",
+        claims.user_uuid,
+        org_uuid,
+        belongs
+    );
+
     if !belongs {
+        tracing::warn!(
+            "[CRM create_customer] User {} does not belong to organization {}",
+            claims.user_uuid,
+            org_uuid
+        );
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({ "error": "User does not belong to this organization" })),

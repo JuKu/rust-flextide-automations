@@ -3,6 +3,7 @@
 use crate::database::{DatabaseError, DatabasePool};
 use crate::user::{hash_password, User, UserCreationError};
 use sqlx::Row;
+use uuid::Uuid;
 
 /// Error type for user database operations
 #[derive(Debug, thiserror::Error)]
@@ -176,72 +177,175 @@ pub async fn get_user_by_email(pool: &DatabasePool, email: &str) -> Result<User,
 /// - Activated: true
 /// - Mail verified: true (for admin user)
 ///
+/// Also ensures the admin user has an organization:
+/// - If the admin user doesn't belong to any organization, creates "My Organization"
+/// - Adds the admin user as owner of the organization
+///
 /// # Errors
 /// Returns `UserDatabaseError` if database operations fail
 pub async fn ensure_default_admin_user(pool: &DatabasePool) -> Result<(), UserDatabaseError> {
     // Check if any users exist
-    if has_any_users(pool).await? {
-        return Ok(());
-    }
+    let admin_user_uuid = if has_any_users(pool).await? {
+        // Users exist, check if admin user exists and get their UUID
+        match get_user_by_email(pool, "admin@example.com").await {
+            Ok(user) => user.uuid,
+            Err(_) => {
+                // Admin user doesn't exist, but other users do - don't create admin
+                return Ok(());
+            }
+        }
+    } else {
+        // No users exist, create admin user
+        let uuid = Uuid::new_v4().to_string();
+        let email = "admin@example.com";
+        let password = "admin";
+        let password_hash = hash_password(password)
+            .map_err(|e| UserDatabaseError::UserCreation(UserCreationError::PasswordHashing(e)))?;
+        let prename = "Admin";
+        let mail_verified = 1; // true for admin
+        let activated = 1; // true
 
-    // Create admin user
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let email = "admin@example.com";
-    let password = "admin";
-    let password_hash = hash_password(password)
-        .map_err(|e| UserDatabaseError::UserCreation(UserCreationError::PasswordHashing(e)))?;
-    let prename = "Admin";
-    let mail_verified = 1; // true for admin
-    let activated = 1; // true
+        match pool {
+            DatabasePool::MySql(p) => {
+                sqlx::query(
+                    "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(&uuid)
+                .bind(email)
+                .bind(&password_hash)
+                .bind::<Option<String>>(None)
+                .bind(prename)
+                .bind::<Option<String>>(None)
+                .bind(mail_verified)
+                .bind(activated)
+                .execute(p)
+                .await?;
+            }
+            DatabasePool::Postgres(p) => {
+                sqlx::query(
+                    "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                )
+                .bind(&uuid)
+                .bind(email)
+                .bind(&password_hash)
+                .bind::<Option<String>>(None)
+                .bind(prename)
+                .bind::<Option<String>>(None)
+                .bind(mail_verified)
+                .bind(activated)
+                .execute(p)
+                .await?;
+            }
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )
+                .bind(&uuid)
+                .bind(email)
+                .bind(&password_hash)
+                .bind::<Option<String>>(None)
+                .bind(prename)
+                .bind::<Option<String>>(None)
+                .bind(mail_verified)
+                .bind(activated)
+                .execute(p)
+                .await?;
+            }
+        }
+        
+        uuid
+    };
 
-    match pool {
+    // Check if admin user belongs to any organization
+    let has_organization = match pool {
         DatabasePool::MySql(p) => {
-            sqlx::query(
-                "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&uuid)
-            .bind(email)
-            .bind(&password_hash)
-            .bind::<Option<String>>(None)
-            .bind(prename)
-            .bind::<Option<String>>(None)
-            .bind(mail_verified)
-            .bind(activated)
-            .execute(p)
-            .await?;
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?")
+                .bind(&admin_user_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count > 0
         }
         DatabasePool::Postgres(p) => {
-            sqlx::query(
-                "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            )
-            .bind(&uuid)
-            .bind(email)
-            .bind(&password_hash)
-            .bind::<Option<String>>(None)
-            .bind(prename)
-            .bind::<Option<String>>(None)
-            .bind(mail_verified)
-            .bind(activated)
-            .execute(p)
-            .await?;
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = $1")
+                .bind(&admin_user_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count > 0
         }
         DatabasePool::Sqlite(p) => {
-            sqlx::query(
-                "INSERT INTO users (uuid, email, password_hash, salt, prename, lastname, mail_verified, activated) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )
-            .bind(&uuid)
-            .bind(email)
-            .bind(&password_hash)
-            .bind::<Option<String>>(None)
-            .bind(prename)
-            .bind::<Option<String>>(None)
-            .bind(mail_verified)
-            .bind(activated)
-            .execute(p)
-            .await?;
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?1")
+                .bind(&admin_user_uuid)
+                .fetch_one(p)
+                .await?;
+            let count: i64 = row.get("count");
+            count > 0
+        }
+    };
+
+    // If admin user doesn't have an organization, create one
+    if !has_organization {
+        let org_uuid = Uuid::new_v4().to_string();
+        let org_name = "My Organization";
+
+        // Create organization
+        match pool {
+            DatabasePool::MySql(p) => {
+                sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?, ?, ?)")
+                    .bind(&org_uuid)
+                    .bind(org_name)
+                    .bind(&admin_user_uuid)
+                    .execute(p)
+                    .await?;
+            }
+            DatabasePool::Postgres(p) => {
+                sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES ($1, $2, $3)")
+                    .bind(&org_uuid)
+                    .bind(org_name)
+                    .bind(&admin_user_uuid)
+                    .execute(p)
+                    .await?;
+            }
+            DatabasePool::Sqlite(p) => {
+                sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?1, ?2, ?3)")
+                    .bind(&org_uuid)
+                    .bind(org_name)
+                    .bind(&admin_user_uuid)
+                    .execute(p)
+                    .await?;
+            }
+        }
+
+        // Add admin user as owner of the organization
+        match pool {
+            DatabasePool::MySql(p) => {
+                sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, ?)")
+                    .bind(&org_uuid)
+                    .bind(&admin_user_uuid)
+                    .bind("owner")
+                    .execute(p)
+                    .await?;
+            }
+            DatabasePool::Postgres(p) => {
+                sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, $3)")
+                    .bind(&org_uuid)
+                    .bind(&admin_user_uuid)
+                    .bind("owner")
+                    .execute(p)
+                    .await?;
+            }
+            DatabasePool::Sqlite(p) => {
+                sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?1, ?2, ?3)")
+                    .bind(&org_uuid)
+                    .bind(&admin_user_uuid)
+                    .bind("owner")
+                    .execute(p)
+                    .await?;
+            }
         }
     }
 
