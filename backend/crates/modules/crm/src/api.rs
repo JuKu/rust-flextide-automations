@@ -160,12 +160,21 @@ pub async fn delete_customer(
         ));
     }
 
-    // TODO: Implement customer deletion
-    // For now, return not implemented
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({ "error": "Customer deletion not yet implemented" })),
-    ))
+    // Delete customer
+    customer
+        .delete(&pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error deleting customer: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to delete customer" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "message": "Customer deleted successfully"
+    })))
 }
 
 /// Add a note to a customer

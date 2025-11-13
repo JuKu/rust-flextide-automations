@@ -260,5 +260,27 @@ impl CrmCustomer {
     ) -> Result<(), CrmCustomerDatabaseError> {
         database::delete_customer_address(pool, &self.uuid, address_uuid).await
     }
+
+    /// Delete this customer from the database
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the customer was successfully deleted
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if:
+    /// - The customer does not exist
+    /// - The database operation fails
+    ///
+    /// # Note
+    /// This will cascade delete all related records (notes, addresses, conversations) due to foreign key constraints
+    pub async fn delete(
+        self,
+        pool: &flextide_core::database::DatabasePool,
+    ) -> Result<(), CrmCustomerDatabaseError> {
+        database::delete_customer(pool, &self.uuid).await
+    }
 }
 

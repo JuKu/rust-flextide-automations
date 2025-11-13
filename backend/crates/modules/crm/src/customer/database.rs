@@ -250,6 +250,57 @@ pub async fn create_customer(
     Ok(customer_uuid)
 }
 
+/// Delete a customer from the database
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `customer_uuid` - UUID of the customer to delete
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database operation fails or customer is not found
+///
+/// # Note
+/// This will cascade delete all related records (notes, addresses, conversations) due to foreign key constraints
+pub async fn delete_customer(
+    pool: &DatabasePool,
+    customer_uuid: &str,
+) -> Result<(), CrmCustomerDatabaseError> {
+    match pool {
+        DatabasePool::MySql(p) => {
+            let result = sqlx::query("DELETE FROM module_crm_customers WHERE uuid = ?")
+                .bind(customer_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+        DatabasePool::Postgres(p) => {
+            let result = sqlx::query("DELETE FROM module_crm_customers WHERE uuid = $1")
+                .bind(customer_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+        DatabasePool::Sqlite(p) => {
+            let result = sqlx::query("DELETE FROM module_crm_customers WHERE uuid = ?1")
+                .bind(customer_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Create a new customer note in the database
 ///
 /// # Arguments
