@@ -65,6 +65,87 @@ pub async fn create_test_app() -> axum::Router {
     .await
     .expect("Failed to create organization_members table");
     
+    // Create permission_groups table for tests (must be created before permissions)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS permission_groups (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            visible INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create permission_groups table");
+    
+    // Create permissions table for tests (must be created before user_permissions)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS permissions (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            permission_group_name VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            visible INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (permission_group_name) REFERENCES permission_groups(name) ON DELETE RESTRICT
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create permissions table");
+    
+    // Create user_permissions table for tests (must be created before ensure_default_admin_user)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS user_permissions (
+            user_id CHAR(36) NOT NULL,
+            organization_uuid CHAR(36) NOT NULL,
+            permission_name VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, organization_uuid, permission_name),
+            FOREIGN KEY (user_id) REFERENCES users(uuid) ON DELETE CASCADE,
+            FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+            FOREIGN KEY (permission_name) REFERENCES permissions(name) ON DELETE CASCADE
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create user_permissions table");
+    
+    // Insert super_admin permission group and permission for tests
+    sqlx::query(
+        "INSERT OR IGNORE INTO permission_groups (id, name, title, description, visible, sort_order)
+         VALUES ('00000000-0000-0000-0000-000000000005', 'super_admin', 'Super Admin', 'Super administrator permissions that grant access to everything in an organization', 1, 0)"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to insert super_admin permission group");
+    
+    sqlx::query(
+        "INSERT OR IGNORE INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
+         VALUES ('20000000-0000-0000-0000-000000000001', 'super_admin', 'super_admin', 'Super Admin', 'Grants the user access to everything in the organization', 1, 1)"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to insert super_admin permission");
+    
     // Ensure default admin user exists for tests (must be called after all tables are created)
     flextide_core::user::ensure_default_admin_user(&db_pool)
         .await
@@ -213,6 +294,87 @@ pub async fn create_test_app_with_org() -> (axum::Router, String, String, String
     .await
     .expect("Failed to create organization_members table");
     
+    // Create permission_groups table for tests (must be created before permissions)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS permission_groups (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            visible INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create permission_groups table");
+    
+    // Create permissions table for tests (must be created before user_permissions)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS permissions (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            permission_group_name VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            visible INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (permission_group_name) REFERENCES permission_groups(name) ON DELETE RESTRICT
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create permissions table");
+    
+    // Create user_permissions table for tests (must be created before ensure_default_admin_user)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS user_permissions (
+            user_id CHAR(36) NOT NULL,
+            organization_uuid CHAR(36) NOT NULL,
+            permission_name VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, organization_uuid, permission_name),
+            FOREIGN KEY (user_id) REFERENCES users(uuid) ON DELETE CASCADE,
+            FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+            FOREIGN KEY (permission_name) REFERENCES permissions(name) ON DELETE CASCADE
+        )"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to create user_permissions table");
+    
+    // Insert super_admin permission group and permission for tests
+    sqlx::query(
+        "INSERT OR IGNORE INTO permission_groups (id, name, title, description, visible, sort_order)
+         VALUES ('00000000-0000-0000-0000-000000000005', 'super_admin', 'Super Admin', 'Super administrator permissions that grant access to everything in an organization', 1, 0)"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to insert super_admin permission group");
+    
+    sqlx::query(
+        "INSERT OR IGNORE INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
+         VALUES ('20000000-0000-0000-0000-000000000001', 'super_admin', 'super_admin', 'Super Admin', 'Grants the user access to everything in the organization', 1, 1)"
+    )
+    .execute(match &db_pool {
+        flextide_core::database::DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to insert super_admin permission");
+    
     // Ensure default admin user exists for tests (must be called after all tables are created)
     flextide_core::user::ensure_default_admin_user(&db_pool)
         .await
@@ -338,6 +500,20 @@ pub async fn setup_test_organization_in_pool(db_pool: &flextide_core::database::
     })
     .await
     .expect("Failed to add user to organization");
+    
+    // Grant super_admin permission to admin user for the test organization
+    sqlx::query(
+        "INSERT OR IGNORE INTO user_permissions (user_id, organization_uuid, permission_name)
+         VALUES (?1, ?2, 'super_admin')"
+    )
+    .bind(&admin_uuid)
+    .bind(&org_uuid)
+    .execute(match db_pool {
+        DatabasePool::Sqlite(p) => p,
+        _ => unreachable!("Test pool should be SQLite"),
+    })
+    .await
+    .expect("Failed to grant super_admin permission");
     
     (org_uuid, admin_uuid, admin_user.email)
 }

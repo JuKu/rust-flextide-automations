@@ -845,20 +845,27 @@ pub async fn create_organization(
 /// GET /api/permissions
 /// Returns a list of permission strings that the user has for the current organization
 pub async fn get_permissions(
+    State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Extension(org_uuid): Extension<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // TODO: Fetch real permissions from database
-    // For now, return mock data
-    // Mock permissions - in production, query user_permissions table
-    let permissions = vec![
-        "module_crm_create_customer",
-        "module_crm_search_customers",
-        "module_crm_delete_customer",
-        "module_crm_add_note",
-        "module_crm_add_address",
-        // Add more mock permissions as needed
-    ];
+    use flextide_core::permissions::list_user_permissions;
+    
+    let user_permissions = list_user_permissions(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch user permissions: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to fetch permissions" })),
+            )
+        })?;
+    
+    // Extract just the permission names
+    let permissions: Vec<String> = user_permissions
+        .into_iter()
+        .map(|up| up.permission_name)
+        .collect();
     
     Ok(Json(json!({
         "permissions": permissions,

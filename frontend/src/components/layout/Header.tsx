@@ -131,6 +131,32 @@ export function Header() {
     fetchOrganizations();
   }, [router]);
 
+  // Fetch permissions when organization changes
+  useEffect(() => {
+    if (!currentOrgUuid || !isAuthenticated()) {
+      return;
+    }
+
+    async function loadPermissions() {
+      try {
+        // Small delay to ensure organization UUID is properly set in sessionStorage
+        // This prevents race conditions during page reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const { fetchPermissions } = await import('@/lib/permissions');
+        await fetchPermissions(currentOrgUuid!); // Safe to use ! here because we checked above
+      } catch (error) {
+        // Silently handle errors - permissions will be fetched on next API call
+        // Don't log to console to avoid noise during organization switching
+        if (error instanceof Error && !error.message.includes('Network error')) {
+          console.error('Failed to fetch permissions:', error);
+        }
+      }
+    }
+
+    loadPermissions();
+  }, [currentOrgUuid]);
+
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
   // Close menus when clicking outside
@@ -159,6 +185,9 @@ export function Header() {
     if (payload?.user_uuid) {
       await logout(payload.user_uuid);
     }
+    // Clear permissions cache on logout
+    const { clearPermissionsCache } = await import('@/lib/permissions');
+    clearPermissionsCache();
     removeToken();
     router.push("/login");
   };
@@ -374,8 +403,12 @@ export function Header() {
                 {organizations.map((org) => (
                   <button
                     key={org.uuid}
-                    onClick={() => {
+                    onClick={async () => {
                       if (org.uuid !== currentOrgUuid) {
+                        // Clear permissions cache when switching organizations
+                        const { clearPermissionsCache } = await import('@/lib/permissions');
+                        clearPermissionsCache();
+                        
                         setCurrentOrgUuid(org.uuid);
                         setCurrentOrganizationUuid(org.uuid);
                         setOrgMenuOpen(false);

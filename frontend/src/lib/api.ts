@@ -848,6 +848,47 @@ export async function getCrmCustomerConversations(uuid: string): Promise<CrmCust
   }
 }
 
+/**
+ * Get permissions for the current user in the current organization
+ */
+export interface GetPermissionsResponse {
+  permissions: string[];
+  user_uuid: string;
+  organization_uuid: string;
+}
+
+export async function getPermissions(): Promise<GetPermissionsResponse> {
+  try {
+    const headers = getApiHeaders('/api/permissions');
+    
+    // Ensure we have a token before making the request
+    if (!headers['Authorization']) {
+      throw new Error('Not authenticated. Please log in again.');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/permissions'), {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Authentication failed. Please log in again.');
+      }
+      throw new Error('Failed to fetch permissions');
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch permissions:', error);
+    throw error;
+  }
+}
+
 export async function updateCrmCustomer(uuid: string, data: UpdateCrmCustomerRequest): Promise<void> {
   try {
     const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}`), {
