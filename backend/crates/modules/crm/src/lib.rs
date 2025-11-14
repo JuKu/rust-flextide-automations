@@ -17,8 +17,9 @@ use serde_json::json;
 use sqlx::Row;
 
 pub use customer::{
-    CrmCustomer, CrmCustomerAddress, CrmCustomerNote, CreateCrmCustomerAddressRequest,
-    CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest,
+    CrmCustomer, CrmCustomerAddress, CrmCustomerConversation, CrmCustomerNote,
+    CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
+    CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, UpdateCrmCustomerRequest,
 };
 
 pub fn create_router<S>() -> Router<S>

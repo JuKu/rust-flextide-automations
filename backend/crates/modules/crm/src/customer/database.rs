@@ -1,8 +1,9 @@
 //! Database operations for CRM customers
 
 use crate::customer::{
-    CreateCrmCustomerAddressRequest, CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest,
-    CrmCustomer, CrmCustomerNote,
+    CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
+    CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, CrmCustomer, CrmCustomerConversation,
+    CrmCustomerNote, UpdateCrmCustomerRequest,
 };
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
@@ -1040,5 +1041,490 @@ pub async fn list_customers_paginated(
     };
     
     Ok((customers, total_count))
+}
+
+/// Load all conversations for a customer from the database
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `customer_uuid` - UUID of the customer to load conversations for
+///
+/// # Returns
+/// Returns a vector of `CrmCustomerConversation` sorted by creation date (newest first)
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database query fails
+pub async fn load_customer_conversations(
+    pool: &DatabasePool,
+    customer_uuid: &str,
+) -> Result<Vec<CrmCustomerConversation>, CrmCustomerDatabaseError> {
+    match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT conversation_uuid, customer_uuid, message, source, channel_uuid, created_at 
+                 FROM module_crm_customer_conversations 
+                 WHERE customer_uuid = ? 
+                 ORDER BY created_at DESC",
+            )
+            .bind(customer_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomerConversation {
+                    uuid: row.get("conversation_uuid"),
+                    customer_uuid: row.get("customer_uuid"),
+                    message: row.get("message"),
+                    source: row.get("source"),
+                    channel_uuid: row.get("channel_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT conversation_uuid, customer_uuid, message, source, channel_uuid, created_at 
+                 FROM module_crm_customer_conversations 
+                 WHERE customer_uuid = $1 
+                 ORDER BY created_at DESC",
+            )
+            .bind(customer_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomerConversation {
+                    uuid: row.get("conversation_uuid"),
+                    customer_uuid: row.get("customer_uuid"),
+                    message: row.get("message"),
+                    source: row.get("source"),
+                    channel_uuid: row.get("channel_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT conversation_uuid, customer_uuid, message, source, channel_uuid, created_at 
+                 FROM module_crm_customer_conversations 
+                 WHERE customer_uuid = ?1 
+                 ORDER BY created_at DESC",
+            )
+            .bind(customer_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| CrmCustomerConversation {
+                    uuid: row.get("conversation_uuid"),
+                    customer_uuid: row.get("customer_uuid"),
+                    message: row.get("message"),
+                    source: row.get("source"),
+                    channel_uuid: row.get("channel_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+    }
+}
+
+/// Create a new customer conversation in the database
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `customer_uuid` - UUID of the customer the conversation belongs to
+/// * `request` - Conversation creation request
+///
+/// # Returns
+/// Returns the UUID of the newly created conversation
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database operation fails
+pub async fn create_customer_conversation(
+    pool: &DatabasePool,
+    customer_uuid: &str,
+    request: CreateCrmCustomerConversationRequest,
+) -> Result<String, CrmCustomerDatabaseError> {
+    let conversation_uuid = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now();
+
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO module_crm_customer_conversations 
+                 (conversation_uuid, customer_uuid, message, source, channel_uuid, created_at) 
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&conversation_uuid)
+            .bind(customer_uuid)
+            .bind(&request.message)
+            .bind(&request.source)
+            .bind(&request.channel_uuid)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO module_crm_customer_conversations 
+                 (conversation_uuid, customer_uuid, message, source, channel_uuid, created_at) 
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(&conversation_uuid)
+            .bind(customer_uuid)
+            .bind(&request.message)
+            .bind(&request.source)
+            .bind(&request.channel_uuid)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO module_crm_customer_conversations 
+                 (conversation_uuid, customer_uuid, message, source, channel_uuid, created_at) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&conversation_uuid)
+            .bind(customer_uuid)
+            .bind(&request.message)
+            .bind(&request.source)
+            .bind(&request.channel_uuid)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    Ok(conversation_uuid)
+}
+
+/// Update a customer in the database
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `customer_uuid` - UUID of the customer to update
+/// * `request` - Update request with fields to update (only Some fields will be updated)
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if the database operation fails
+pub async fn update_customer(
+    pool: &DatabasePool,
+    customer_uuid: &str,
+    request: UpdateCrmCustomerRequest,
+) -> Result<(), CrmCustomerDatabaseError> {
+    let now = Utc::now();
+
+    // Build dynamic UPDATE query based on which fields are provided
+    let mut update_fields = Vec::new();
+
+    if request.first_name.is_some() {
+        update_fields.push("first_name = ?");
+    }
+    if request.last_name.is_some() {
+        update_fields.push("last_name = ?");
+    }
+    if request.email.is_some() {
+        update_fields.push("email = ?");
+    }
+    if request.phone_number.is_some() {
+        update_fields.push("phone_number = ?");
+    }
+    if request.user_id.is_some() {
+        update_fields.push("user_id = ?");
+    }
+    if request.salutation.is_some() {
+        update_fields.push("salutation = ?");
+    }
+    if request.job_title.is_some() {
+        update_fields.push("job_title = ?");
+    }
+    if request.department.is_some() {
+        update_fields.push("department = ?");
+    }
+    if request.company_name.is_some() {
+        update_fields.push("company_name = ?");
+    }
+    if request.fax_number.is_some() {
+        update_fields.push("fax_number = ?");
+    }
+    if request.website_url.is_some() {
+        update_fields.push("website_url = ?");
+    }
+    if request.gender.is_some() {
+        update_fields.push("gender = ?");
+    }
+
+    // Always update updated_at
+    update_fields.push("updated_at = ?");
+
+    if update_fields.is_empty() {
+        // No fields to update
+        return Ok(());
+    }
+
+    let update_clause = update_fields.join(", ");
+    
+    match pool {
+        DatabasePool::MySql(p) => {
+            let query_str = format!(
+                "UPDATE module_crm_customers SET {} WHERE uuid = ?",
+                update_clause
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.first_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.last_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.email {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.phone_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.user_id {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.salutation {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.job_title {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.department {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.company_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.fax_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.website_url {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.gender {
+                query = query.bind(v);
+            }
+            query = query.bind(now);
+            query = query.bind(customer_uuid);
+
+            query.execute(p).await?;
+        }
+        DatabasePool::Postgres(p) => {
+            let mut bind_index = 1;
+            let mut update_fields_pg = Vec::new();
+
+            if request.first_name.is_some() {
+                update_fields_pg.push(format!("first_name = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.last_name.is_some() {
+                update_fields_pg.push(format!("last_name = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.email.is_some() {
+                update_fields_pg.push(format!("email = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.phone_number.is_some() {
+                update_fields_pg.push(format!("phone_number = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.user_id.is_some() {
+                update_fields_pg.push(format!("user_id = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.salutation.is_some() {
+                update_fields_pg.push(format!("salutation = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.job_title.is_some() {
+                update_fields_pg.push(format!("job_title = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.department.is_some() {
+                update_fields_pg.push(format!("department = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.company_name.is_some() {
+                update_fields_pg.push(format!("company_name = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.fax_number.is_some() {
+                update_fields_pg.push(format!("fax_number = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.website_url.is_some() {
+                update_fields_pg.push(format!("website_url = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.gender.is_some() {
+                update_fields_pg.push(format!("gender = ${}", bind_index));
+                bind_index += 1;
+            }
+            update_fields_pg.push(format!("updated_at = ${}", bind_index));
+            bind_index += 1;
+
+            let update_clause_pg = update_fields_pg.join(", ");
+            let query_str = format!(
+                "UPDATE module_crm_customers SET {} WHERE uuid = ${}",
+                update_clause_pg, bind_index
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.first_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.last_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.email {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.phone_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.user_id {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.salutation {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.job_title {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.department {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.company_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.fax_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.website_url {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.gender {
+                query = query.bind(v);
+            }
+            query = query.bind(now);
+            query = query.bind(customer_uuid);
+
+            query.execute(p).await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            let mut bind_index = 1;
+            let mut update_fields_sqlite = Vec::new();
+
+            if request.first_name.is_some() {
+                update_fields_sqlite.push(format!("first_name = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.last_name.is_some() {
+                update_fields_sqlite.push(format!("last_name = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.email.is_some() {
+                update_fields_sqlite.push(format!("email = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.phone_number.is_some() {
+                update_fields_sqlite.push(format!("phone_number = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.user_id.is_some() {
+                update_fields_sqlite.push(format!("user_id = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.salutation.is_some() {
+                update_fields_sqlite.push(format!("salutation = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.job_title.is_some() {
+                update_fields_sqlite.push(format!("job_title = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.department.is_some() {
+                update_fields_sqlite.push(format!("department = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.company_name.is_some() {
+                update_fields_sqlite.push(format!("company_name = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.fax_number.is_some() {
+                update_fields_sqlite.push(format!("fax_number = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.website_url.is_some() {
+                update_fields_sqlite.push(format!("website_url = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.gender.is_some() {
+                update_fields_sqlite.push(format!("gender = ?{}", bind_index));
+                bind_index += 1;
+            }
+            update_fields_sqlite.push(format!("updated_at = ?{}", bind_index));
+            bind_index += 1;
+
+            let update_clause_sqlite = update_fields_sqlite.join(", ");
+            let query_str = format!(
+                "UPDATE module_crm_customers SET {} WHERE uuid = ?{}",
+                update_clause_sqlite, bind_index
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.first_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.last_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.email {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.phone_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.user_id {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.salutation {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.job_title {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.department {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.company_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.fax_number {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.website_url {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.gender {
+                query = query.bind(v);
+            }
+            query = query.bind(now);
+            query = query.bind(customer_uuid);
+
+            query.execute(p).await?;
+        }
+    }
+
+    Ok(())
 }
 

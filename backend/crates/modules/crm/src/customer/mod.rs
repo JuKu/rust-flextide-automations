@@ -88,6 +88,27 @@ pub struct CrmCustomerAddress {
     pub updated_at: DateTime<Utc>,
 }
 
+/// CRM Customer Conversation data structure
+///
+/// Represents a conversation message attached to a customer in the CRM system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrmCustomerConversation {
+    pub uuid: String,
+    pub customer_uuid: String,
+    pub message: String,
+    pub source: String, // FROM_TEAM, FROM_CUSTOMER, INTERNAL_NOTE
+    pub channel_uuid: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Request structure for creating a new customer conversation
+#[derive(Debug, Deserialize)]
+pub struct CreateCrmCustomerConversationRequest {
+    pub message: String,
+    pub source: String,
+    pub channel_uuid: String,
+}
+
 /// Request structure for creating a new customer address
 #[derive(Debug, Deserialize)]
 pub struct CreateCrmCustomerAddressRequest {
@@ -98,6 +119,23 @@ pub struct CreateCrmCustomerAddressRequest {
     pub postal_code: Option<String>,
     pub country: Option<String>,
     pub is_primary: Option<bool>,
+}
+
+/// Request structure for updating a customer
+#[derive(Debug, Deserialize)]
+pub struct UpdateCrmCustomerRequest {
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub user_id: Option<String>,
+    pub salutation: Option<String>,
+    pub job_title: Option<String>,
+    pub department: Option<String>,
+    pub company_name: Option<String>,
+    pub fax_number: Option<String>,
+    pub website_url: Option<String>,
+    pub gender: Option<String>,
 }
 
 impl CrmCustomer {
@@ -323,6 +361,61 @@ impl CrmCustomer {
         page_size: u32,
     ) -> Result<(Vec<CrmCustomer>, u32), CrmCustomerDatabaseError> {
         database::list_customers_paginated(pool, organization_uuid, page, page_size).await
+    }
+
+    /// List all conversations for this customer
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    ///
+    /// # Returns
+    /// Returns a vector of `CrmCustomerConversation` sorted by creation date (newest first)
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if the database query fails
+    pub async fn list_conversations(
+        &self,
+        pool: &flextide_core::database::DatabasePool,
+    ) -> Result<Vec<CrmCustomerConversation>, CrmCustomerDatabaseError> {
+        database::load_customer_conversations(pool, &self.uuid).await
+    }
+
+    /// Add a new conversation to this customer
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `request` - Conversation creation request
+    ///
+    /// # Returns
+    /// Returns the UUID of the newly created conversation
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if validation fails or the database operation fails
+    pub async fn add_conversation(
+        &self,
+        pool: &flextide_core::database::DatabasePool,
+        request: CreateCrmCustomerConversationRequest,
+    ) -> Result<String, CrmCustomerDatabaseError> {
+        database::create_customer_conversation(pool, &self.uuid, request).await
+    }
+
+    /// Update this customer in the database
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `request` - Update request with fields to update (only Some fields will be updated)
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the customer was successfully updated
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if the database operation fails
+    pub async fn update(
+        &self,
+        pool: &flextide_core::database::DatabasePool,
+        request: UpdateCrmCustomerRequest,
+    ) -> Result<(), CrmCustomerDatabaseError> {
+        database::update_customer(pool, &self.uuid, request).await
     }
 }
 

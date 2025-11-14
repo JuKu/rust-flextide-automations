@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { CrmCustomer } from "@/lib/api";
 
 interface CrmCustomersSectionProps {
@@ -14,6 +15,7 @@ export function CrmCustomersSection({
   onCreateCustomer,
   onSearch,
 }: CrmCustomersSectionProps) {
+  const router = useRouter();
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -177,7 +179,8 @@ export function CrmCustomersSection({
             {customers.map((customer) => (
               <div
                 key={customer.id}
-                className="p-4 rounded-md border border-flextide-neutral-border hover:border-flextide-primary-accent hover:shadow-sm transition-all"
+                onClick={() => router.push(`/modules/crm/customers/${customer.id}`)}
+                className="p-4 rounded-md border border-flextide-neutral-border hover:border-flextide-primary-accent hover:shadow-sm transition-all cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-4 mb-3">
                   <div className="flex-1 min-w-0">

@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 
 use crate::customer::{
-    CreateCrmCustomerAddressRequest, CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest,
-    CrmCustomer,
+    CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
+    CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, CrmCustomer, UpdateCrmCustomerRequest,
 };
 use flextide_core::database::DatabasePool;
 use flextide_core::jwt::Claims;
@@ -620,6 +620,472 @@ pub async fn search_customers(
     })))
 }
 
+/// Get a single customer by UUID
+///
+/// GET /api/modules/crm/customers/{uuid}
+pub async fn get_customer(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_customer")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view customer details" })),
+        ));
+    }
+
+    // Load customer
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    Ok(Json(json!(customer)))
+}
+
+/// Get customer KPIs
+///
+/// GET /api/modules/crm/customers/{uuid}/kpis
+pub async fn get_customer_kpis(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_customer")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view customer details" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // TODO: Fetch real KPIs from database
+    // For now, return mocked data
+    let kpis = json!({
+        "clv": 12500.50, // Customer Lifetime Value in €
+        "avg_deal_amount": 2500.00, // Average money amount per deal
+        "org_avg_deal_amount": 2200.00, // Average of all customers in organization
+        "last_deal_date": Option::<String>::None, // Last deal date
+        "current_sale_status": "Has obtained a quote", // Pipeline status
+        "source": "Website", // Where customer came from
+        "assigned_user": customer.user_id, // Assigned user UUID
+        "days_since_last_contact": 5, // Days since last contact
+        "last_interaction_date": Option::<String>::None, // Last interaction date
+        "created_at": customer.created_at.to_rfc3339(),
+    });
+
+    Ok(Json(kpis))
+}
+
+/// Get customer notes
+///
+/// GET /api/modules/crm/customers/{uuid}/notes
+pub async fn get_customer_notes(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_customer")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view customer details" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // Load notes
+    let notes = customer.list_notes(&pool).await.map_err(|e| {
+        tracing::error!("Error loading notes: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to load notes" })),
+        )
+    })?;
+
+    Ok(Json(json!(notes)))
+}
+
+/// Get customer conversations
+///
+/// GET /api/modules/crm/customers/{uuid}/conversations
+pub async fn get_customer_conversations(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_customer")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view customer details" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // Load conversations
+    let conversations = customer.list_conversations(&pool).await.map_err(|e| {
+        tracing::error!("Error loading conversations: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to load conversations" })),
+        )
+    })?;
+
+    Ok(Json(json!(conversations)))
+}
+
+/// Add a conversation to a customer
+///
+/// POST /api/modules/crm/customers/{uuid}/conversations
+pub async fn add_customer_conversation(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+    Json(request): Json<CreateCrmCustomerConversationRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_add_customer_notes")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to add customer conversations" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // Add conversation
+    let conversation_uuid = customer
+        .add_conversation(&pool, request)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error adding conversation: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to add conversation" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "uuid": conversation_uuid,
+        "message": "Conversation added successfully"
+    })))
+}
+
+/// Update a customer
+///
+/// PUT /api/modules/crm/customers/{uuid}
+pub async fn update_customer(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_uuid): Path<String>,
+    Json(request): Json<UpdateCrmCustomerRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_edit_customers")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to edit customers" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // Update customer
+    customer
+        .update(&pool, request)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error updating customer: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update customer" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "message": "Customer updated successfully"
+    })))
+}
+
 /// Create the API router for CRM endpoints
 pub fn create_api_router<S>() -> Router<S>
 where
@@ -628,12 +1094,14 @@ where
     Router::new()
         .route("/modules/crm/customers", post(create_customer))
         .route("/modules/crm/customers/search", get(search_customers))
-        .route("/modules/crm/customers/{uuid}", delete(delete_customer))
-        .route("/modules/crm/customers/{uuid}/notes", post(add_customer_note))
+        .route("/modules/crm/customers/{uuid}", get(get_customer).put(update_customer).delete(delete_customer))
+        .route("/modules/crm/customers/{uuid}/kpis", get(get_customer_kpis))
+        .route("/modules/crm/customers/{uuid}/notes", get(get_customer_notes).post(add_customer_note))
         .route(
             "/modules/crm/customers/{uuid}/notes/{note_uuid}",
             delete(delete_customer_note),
         )
+        .route("/modules/crm/customers/{uuid}/conversations", get(get_customer_conversations).post(add_customer_conversation))
         .route("/modules/crm/customers/{uuid}/addresses", post(add_customer_address))
         .route(
             "/modules/crm/customers/{uuid}/addresses/{address_uuid}",

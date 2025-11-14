@@ -351,6 +351,73 @@ export interface CrmCustomer {
   last_contact: string | null;
 }
 
+// Full customer detail structure (matches backend CrmCustomer)
+export interface CrmCustomerDetail {
+  uuid: string;
+  organization_uuid: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone_number: string | null;
+  user_id: string | null;
+  salutation: string | null;
+  job_title: string | null;
+  department: string | null;
+  company_name: string | null;
+  fax_number: string | null;
+  website_url: string | null;
+  gender: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrmCustomerKpis {
+  clv: number;
+  avg_deal_amount: number;
+  org_avg_deal_amount: number;
+  last_deal_date: string | null;
+  current_sale_status: string;
+  source: string;
+  assigned_user: string | null;
+  days_since_last_contact: number;
+  last_interaction_date: string | null;
+  created_at: string;
+}
+
+export interface CrmCustomerNote {
+  uuid: string;
+  customer_uuid: string;
+  note_text: string;
+  author_id: string;
+  visible_to_customer: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrmCustomerConversation {
+  uuid: string;
+  customer_uuid: string;
+  message: string;
+  source: string; // FROM_TEAM, FROM_CUSTOMER, INTERNAL_NOTE
+  channel_uuid: string;
+  created_at: string;
+}
+
+export interface UpdateCrmCustomerRequest {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone_number?: string;
+  user_id?: string;
+  salutation?: string;
+  job_title?: string;
+  department?: string;
+  company_name?: string;
+  fax_number?: string;
+  website_url?: string;
+  gender?: string;
+}
+
 export interface CrmCustomersResponse {
   customers: CrmCustomer[];
   total: number;
@@ -640,6 +707,160 @@ export async function searchCrmCustomers(
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to search customers:', error);
+    throw error;
+  }
+}
+
+export async function getCrmCustomer(uuid: string): Promise<CrmCustomerDetail> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}`), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch customer';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch customer');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch customer:', error);
+    throw error;
+  }
+}
+
+export async function getCrmCustomerKpis(uuid: string): Promise<CrmCustomerKpis> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}/kpis`), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch customer KPIs';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch customer KPIs');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch customer KPIs:', error);
+    throw error;
+  }
+}
+
+export async function getCrmCustomerNotes(uuid: string): Promise<CrmCustomerNote[]> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}/notes`), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch customer notes';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch customer notes');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch customer notes:', error);
+    throw error;
+  }
+}
+
+export async function getCrmCustomerConversations(uuid: string): Promise<CrmCustomerConversation[]> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}/conversations`), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch customer conversations';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch customer conversations');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch customer conversations:', error);
+    throw error;
+  }
+}
+
+export async function updateCrmCustomer(uuid: string, data: UpdateCrmCustomerRequest): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${uuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to update customer';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to update customer');
+      }
+    }
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update customer:', error);
     throw error;
   }
 }
