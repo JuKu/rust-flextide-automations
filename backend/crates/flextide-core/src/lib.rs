@@ -4,6 +4,7 @@
 
 pub mod database;
 pub mod jwt;
+pub mod permissions;
 pub mod user;
 
 #[cfg(test)]

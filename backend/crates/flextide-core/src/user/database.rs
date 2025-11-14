@@ -53,7 +53,7 @@ pub async fn has_any_users(pool: &DatabasePool) -> Result<bool, UserDatabaseErro
 /// * `pool` - Database connection pool
 /// * `user_uuid` - UUID of the user to check
 /// * `organization_uuid` - UUID of the organization
-/// * `permission` - Permission string to check (e.g., "can_delete_customers")
+/// * `permission` - Permission string to check (e.g., "module_crm_can_create_customers")
 ///
 /// # Returns
 /// Returns `true` if the user has the permission, `false` otherwise
@@ -62,17 +62,99 @@ pub async fn has_any_users(pool: &DatabasePool) -> Result<bool, UserDatabaseErro
 /// Returns `UserDatabaseError` if the database query fails
 ///
 /// # Note
-/// This is currently a mock implementation that always returns `true`.
-/// A database table for permissions will be created later.
+/// Users with the "super_admin" permission automatically have access to everything.
 pub async fn user_has_permission(
-    _pool: &DatabasePool,
-    _user_uuid: &str,
-    _organization_uuid: &str,
-    _permission: &str,
+    pool: &DatabasePool,
+    user_uuid: &str,
+    organization_uuid: &str,
+    permission: &str,
 ) -> Result<bool, UserDatabaseError> {
-    // TODO: Implement actual permission check from database
-    // For now, mock implementation always returns true
-    Ok(true)
+    // First check if user has super_admin permission (grants access to everything)
+    let has_super_admin = match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = ? AND organization_uuid = ? AND permission_name = 'super_admin'",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            count > 0
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = $1 AND organization_uuid = $2 AND permission_name = 'super_admin'",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            count > 0
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = ?1 AND organization_uuid = ?2 AND permission_name = 'super_admin'",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            count > 0
+        }
+    };
+
+    if has_super_admin {
+        return Ok(true);
+    }
+
+    // Check for the specific permission
+    match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = ? AND organization_uuid = ? AND permission_name = ?",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .bind(permission)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = $1 AND organization_uuid = $2 AND permission_name = $3",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .bind(permission)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) as count FROM user_permissions
+                 WHERE user_id = ?1 AND organization_uuid = ?2 AND permission_name = ?3",
+            )
+            .bind(user_uuid)
+            .bind(organization_uuid)
+            .bind(permission)
+            .fetch_one(p)
+            .await?;
+            let count: i64 = row.get("count");
+            Ok(count > 0)
+        }
+    }
 }
 
 /// Get a user by email from the database
@@ -345,6 +427,42 @@ pub async fn ensure_default_admin_user(pool: &DatabasePool) -> Result<(), UserDa
                     .bind("owner")
                     .execute(p)
                     .await?;
+            }
+        }
+
+        // Grant super_admin permission to admin user for the organization
+        match pool {
+            DatabasePool::MySql(p) => {
+                sqlx::query(
+                    "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                     VALUES (?, ?, 'super_admin')
+                     ON DUPLICATE KEY UPDATE permission_name = permission_name",
+                )
+                .bind(&admin_user_uuid)
+                .bind(&org_uuid)
+                .execute(p)
+                .await?;
+            }
+            DatabasePool::Postgres(p) => {
+                sqlx::query(
+                    "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                     VALUES ($1, $2, 'super_admin')
+                     ON CONFLICT (user_id, organization_uuid, permission_name) DO NOTHING",
+                )
+                .bind(&admin_user_uuid)
+                .bind(&org_uuid)
+                .execute(p)
+                .await?;
+            }
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO user_permissions (user_id, organization_uuid, permission_name)
+                     VALUES (?1, ?2, 'super_admin')",
+                )
+                .bind(&admin_user_uuid)
+                .bind(&org_uuid)
+                .execute(p)
+                .await?;
             }
         }
     }
