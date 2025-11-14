@@ -58,6 +58,7 @@ pub struct CrmCustomerNote {
     pub customer_uuid: String,
     pub note_text: String,
     pub author_id: String,
+    pub author_name: Option<String>, // First name + last name of the author
     pub visible_to_customer: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -67,6 +68,13 @@ pub struct CrmCustomerNote {
 #[derive(Debug, Deserialize)]
 pub struct CreateCrmCustomerNoteRequest {
     pub note_text: String,
+    pub visible_to_customer: Option<bool>,
+}
+
+/// Request structure for updating a customer note
+#[derive(Debug, Deserialize)]
+pub struct UpdateCrmCustomerNoteRequest {
+    pub note_text: Option<String>,
     pub visible_to_customer: Option<bool>,
 }
 
@@ -230,6 +238,37 @@ impl CrmCustomer {
         note_uuid: &str,
     ) -> Result<(), CrmCustomerDatabaseError> {
         database::delete_customer_note(pool, &self.uuid, note_uuid).await
+    }
+
+    /// Update a note for this customer
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `note_uuid` - UUID of the note to update
+    /// * `request` - Update request with fields to update (only Some fields will be updated)
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the note was successfully updated
+    ///
+    /// # Errors
+    /// Returns `CrmCustomerDatabaseError` if:
+    /// - The note does not exist
+    /// - The note does not belong to this customer
+    /// - The database operation fails
+    pub async fn update_note(
+        &self,
+        pool: &flextide_core::database::DatabasePool,
+        note_uuid: &str,
+        request: UpdateCrmCustomerNoteRequest,
+    ) -> Result<(), CrmCustomerDatabaseError> {
+        // Validate note_text if provided
+        if let Some(ref note_text) = request.note_text {
+            if note_text.trim().is_empty() || note_text.trim().len() < 2 {
+                return Err(CrmCustomerDatabaseError::InvalidNoteText);
+            }
+        }
+
+        database::update_customer_note(pool, &self.uuid, note_uuid, request).await
     }
 
     /// List all notes for this customer

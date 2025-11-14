@@ -3,7 +3,7 @@
 use crate::customer::{
     CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
     CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, CrmCustomer, CrmCustomerConversation,
-    CrmCustomerNote, UpdateCrmCustomerRequest,
+    CrmCustomerNote, UpdateCrmCustomerRequest, UpdateCrmCustomerNoteRequest,
 };
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
@@ -452,6 +452,131 @@ pub async fn delete_customer_note(
     Ok(())
 }
 
+/// Update a customer note in the database
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `customer_uuid` - UUID of the customer the note belongs to
+/// * `note_uuid` - UUID of the note to update
+/// * `request` - Update request with fields to update (only Some fields will be updated)
+///
+/// # Returns
+/// Returns `Ok(())` if the note was successfully updated
+///
+/// # Errors
+/// Returns `CrmCustomerDatabaseError` if:
+/// - The note does not exist
+/// - The note does not belong to this customer
+/// - The database operation fails
+pub async fn update_customer_note(
+    pool: &DatabasePool,
+    customer_uuid: &str,
+    note_uuid: &str,
+    request: UpdateCrmCustomerNoteRequest,
+) -> Result<(), CrmCustomerDatabaseError> {
+    let now = Utc::now();
+
+    // Build dynamic UPDATE query based on which fields are provided
+    let mut update_fields = Vec::new();
+
+    if request.note_text.is_some() {
+        update_fields.push("note_text = ?");
+    }
+    if request.visible_to_customer.is_some() {
+        update_fields.push("visible_to_customer = ?");
+    }
+
+    // Always update updated_at
+    update_fields.push("updated_at = ?");
+
+    if update_fields.len() == 1 {
+        // Only updated_at, nothing to update
+        return Ok(());
+    }
+
+    let update_clause = update_fields.join(", ");
+
+    match pool {
+        DatabasePool::MySql(p) => {
+            let query_str = format!(
+                "UPDATE module_crm_customer_notes SET {} WHERE uuid = ? AND customer_uuid = ?",
+                update_clause
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.note_text {
+                query = query.bind(v);
+            }
+            if let Some(v) = request.visible_to_customer {
+                let visible_int = if v { 1 } else { 0 };
+                query = query.bind(visible_int);
+            }
+            query = query.bind(now);
+            query = query.bind(note_uuid);
+            query = query.bind(customer_uuid);
+
+            let result = query.execute(p).await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+        DatabasePool::Postgres(p) => {
+            let query_str = format!(
+                "UPDATE module_crm_customer_notes SET {} WHERE uuid = ${} AND customer_uuid = ${}",
+                update_clause,
+                update_fields.len(),
+                update_fields.len() + 1
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.note_text {
+                query = query.bind(v);
+            }
+            if let Some(v) = request.visible_to_customer {
+                query = query.bind(v);
+            }
+            query = query.bind(now);
+            query = query.bind(note_uuid);
+            query = query.bind(customer_uuid);
+
+            let result = query.execute(p).await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+        DatabasePool::Sqlite(p) => {
+            let query_str = format!(
+                "UPDATE module_crm_customer_notes SET {} WHERE uuid = ?{} AND customer_uuid = ?{}",
+                update_clause,
+                update_fields.len(),
+                update_fields.len() + 1
+            );
+            let mut query = sqlx::query(&query_str);
+
+            if let Some(ref v) = request.note_text {
+                query = query.bind(v);
+            }
+            if let Some(v) = request.visible_to_customer {
+                let visible_int = if v { 1 } else { 0 };
+                query = query.bind(visible_int);
+            }
+            query = query.bind(now);
+            query = query.bind(note_uuid);
+            query = query.bind(customer_uuid);
+
+            let result = query.execute(p).await?;
+
+            if result.rows_affected() == 0 {
+                return Err(CrmCustomerDatabaseError::Sql(sqlx::Error::RowNotFound));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Load all notes for a customer from the database
 ///
 /// # Arguments
@@ -470,11 +595,13 @@ pub async fn load_customer_notes(
     match pool {
         DatabasePool::MySql(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, customer_uuid, note_text, author_id, visible_to_customer, 
-                 created_at, updated_at 
-                 FROM module_crm_customer_notes 
-                 WHERE customer_uuid = ? 
-                 ORDER BY created_at ASC",
+                "SELECT n.uuid, n.customer_uuid, n.note_text, n.author_id, n.visible_to_customer, 
+                 n.created_at, n.updated_at,
+                 CONCAT(COALESCE(u.prename, ''), ' ', COALESCE(u.lastname, '')) as author_name
+                 FROM module_crm_customer_notes n
+                 LEFT JOIN users u ON n.author_id = u.uuid
+                 WHERE n.customer_uuid = ? 
+                 ORDER BY n.created_at ASC",
             )
             .bind(customer_uuid)
             .fetch_all(p)
@@ -484,11 +611,17 @@ pub async fn load_customer_notes(
                 .into_iter()
                 .map(|row| {
                     let visible_to_customer_int: i64 = row.get("visible_to_customer");
+                    let author_name: Option<String> = row.get("author_name");
+                    // Trim and handle empty strings
+                    let author_name = author_name
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
                     CrmCustomerNote {
                         uuid: row.get("uuid"),
                         customer_uuid: row.get("customer_uuid"),
                         note_text: row.get("note_text"),
                         author_id: row.get("author_id"),
+                        author_name,
                         visible_to_customer: visible_to_customer_int != 0,
                         created_at: row.get::<DateTime<Utc>, _>("created_at"),
                         updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
@@ -498,11 +631,13 @@ pub async fn load_customer_notes(
         }
         DatabasePool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, customer_uuid, note_text, author_id, visible_to_customer, 
-                 created_at, updated_at 
-                 FROM module_crm_customer_notes 
-                 WHERE customer_uuid = $1 
-                 ORDER BY created_at ASC",
+                "SELECT n.uuid, n.customer_uuid, n.note_text, n.author_id, n.visible_to_customer, 
+                 n.created_at, n.updated_at,
+                 CONCAT(COALESCE(u.prename, ''), ' ', COALESCE(u.lastname, '')) as author_name
+                 FROM module_crm_customer_notes n
+                 LEFT JOIN users u ON n.author_id = u.uuid
+                 WHERE n.customer_uuid = $1 
+                 ORDER BY n.created_at ASC",
             )
             .bind(customer_uuid)
             .fetch_all(p)
@@ -512,11 +647,17 @@ pub async fn load_customer_notes(
                 .into_iter()
                 .map(|row| {
                     let visible_to_customer_int: i64 = row.get("visible_to_customer");
+                    let author_name: Option<String> = row.get("author_name");
+                    // Trim and handle empty strings
+                    let author_name = author_name
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
                     CrmCustomerNote {
                         uuid: row.get("uuid"),
                         customer_uuid: row.get("customer_uuid"),
                         note_text: row.get("note_text"),
                         author_id: row.get("author_id"),
+                        author_name,
                         visible_to_customer: visible_to_customer_int != 0,
                         created_at: row.get::<DateTime<Utc>, _>("created_at"),
                         updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
@@ -526,11 +667,13 @@ pub async fn load_customer_notes(
         }
         DatabasePool::Sqlite(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, customer_uuid, note_text, author_id, visible_to_customer, 
-                 created_at, updated_at 
-                 FROM module_crm_customer_notes 
-                 WHERE customer_uuid = ?1 
-                 ORDER BY created_at ASC",
+                "SELECT n.uuid, n.customer_uuid, n.note_text, n.author_id, n.visible_to_customer, 
+                 n.created_at, n.updated_at,
+                 (COALESCE(u.prename, '') || ' ' || COALESCE(u.lastname, '')) as author_name
+                 FROM module_crm_customer_notes n
+                 LEFT JOIN users u ON n.author_id = u.uuid
+                 WHERE n.customer_uuid = ?1 
+                 ORDER BY n.created_at ASC",
             )
             .bind(customer_uuid)
             .fetch_all(p)
@@ -540,11 +683,17 @@ pub async fn load_customer_notes(
                 .into_iter()
                 .map(|row| {
                     let visible_to_customer_int: i64 = row.get("visible_to_customer");
+                    let author_name: Option<String> = row.get("author_name");
+                    // Trim and handle empty strings
+                    let author_name = author_name
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
                     CrmCustomerNote {
                         uuid: row.get("uuid"),
                         customer_uuid: row.get("customer_uuid"),
                         note_text: row.get("note_text"),
                         author_id: row.get("author_id"),
+                        author_name,
                         visible_to_customer: visible_to_customer_int != 0,
                         created_at: row.get::<DateTime<Utc>, _>("created_at"),
                         updated_at: row.get::<DateTime<Utc>, _>("updated_at"),

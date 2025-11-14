@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
 import {
@@ -9,6 +9,9 @@ import {
   getCrmCustomerNotes,
   getCrmCustomerConversations,
   updateCrmCustomer,
+  addCrmCustomerNote,
+  updateCrmCustomerNote,
+  deleteCrmCustomerNote,
   type CrmCustomerDetail,
   type CrmCustomerKpis,
   type CrmCustomerNote,
@@ -30,9 +33,14 @@ export default function CustomerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<UpdateCrmCustomerRequest>({});
+  const [noteText, setNoteText] = useState("");
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [isUpdatingNote, setIsUpdatingNote] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
+  const fetchData = useCallback(async () => {
     // Wait for organization UUID to be available
     let attempts = 0;
     const maxAttempts = 50;
@@ -76,10 +84,11 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false);
     }
-    }
-
-    fetchData();
   }, [customerUuid]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleSave = async () => {
     if (!customer) return;
@@ -99,6 +108,78 @@ export default function CustomerDetailPage() {
   const handleCancel = () => {
     setIsEditing(false);
     setEditData({});
+  };
+
+  const handleAddNote = async () => {
+    if (!customer || !noteText.trim()) return;
+
+    try {
+      setIsAddingNote(true);
+      await addCrmCustomerNote(customer.uuid, {
+        note_text: noteText.trim(),
+        visible_to_customer: false,
+      });
+      setNoteText("");
+      // Refresh notes to get the full note with author_id
+      const updatedNotes = await getCrmCustomerNotes(customer.uuid);
+      setNotes(updatedNotes);
+    } catch (err) {
+      console.error("Failed to add note:", err);
+      alert(err instanceof Error ? err.message : "Failed to add note");
+    } finally {
+      setIsAddingNote(false);
+    }
+  };
+
+  const handleEditNote = (noteUuid: string, currentText: string) => {
+    setEditingNoteId(noteUuid);
+    setEditingNoteText(currentText);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingNoteId(null);
+    setEditingNoteText("");
+  };
+
+  const handleSaveNote = async () => {
+    if (!customer || !editingNoteId || !editingNoteText.trim()) return;
+
+    try {
+      setIsUpdatingNote(true);
+      await updateCrmCustomerNote(customer.uuid, editingNoteId, {
+        note_text: editingNoteText.trim(),
+      });
+      // Refresh notes to get updated data
+      const updatedNotes = await getCrmCustomerNotes(customer.uuid);
+      setNotes(updatedNotes);
+      setEditingNoteId(null);
+      setEditingNoteText("");
+    } catch (err) {
+      console.error("Failed to update note:", err);
+      alert(err instanceof Error ? err.message : "Failed to update note");
+    } finally {
+      setIsUpdatingNote(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteUuid: string) => {
+    if (!customer) return;
+
+    if (!confirm("Are you sure you want to delete this note?")) {
+      return;
+    }
+
+    try {
+      setDeletingNoteId(noteUuid);
+      await deleteCrmCustomerNote(customer.uuid, noteUuid);
+      // Remove note from state
+      setNotes(notes.filter((note) => note.uuid !== noteUuid));
+    } catch (err) {
+      console.error("Failed to delete note:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete note");
+    } finally {
+      setDeletingNoteId(null);
+    }
   };
 
   const formatDate = (dateString: string | null) => {
@@ -148,6 +229,7 @@ export default function CustomerDetailPage() {
       uuid: note.uuid,
       content: note.note_text,
       author_id: note.author_id,
+      author_name: note.author_name,
       created_at: note.created_at,
       visible_to_customer: note.visible_to_customer,
     })),
@@ -157,6 +239,8 @@ export default function CustomerDetailPage() {
       content: conv.message,
       source: conv.source,
       created_at: conv.created_at,
+      author_id: null as string | null,
+      author_name: null as string | null,
     })),
   ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -190,7 +274,7 @@ export default function CustomerDetailPage() {
         </div>
 
         {/* KPIs Row */}
-        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
           <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-4">
             <div className="text-sm text-flextide-neutral-text-medium mb-1">CLV</div>
             <div className="text-xl font-semibold text-flextide-neutral-text-dark">
@@ -205,6 +289,17 @@ export default function CustomerDetailPage() {
             <div className="text-xs text-flextide-neutral-text-medium mt-1">
               Org avg: €{kpis.org_avg_deal_amount.toLocaleString()}
             </div>
+          </div>
+          <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-4">
+            <div className="text-sm text-flextide-neutral-text-medium mb-1">Open Deal Amount</div>
+            <div className="text-xl font-semibold text-flextide-neutral-text-dark">
+              {kpis.open_deal_amount ? `€${kpis.open_deal_amount.toLocaleString()}` : "—"}
+            </div>
+            {kpis.open_deal_date && (
+              <div className="text-xs text-flextide-neutral-text-medium mt-1">
+                {formatDate(kpis.open_deal_date)}
+              </div>
+            )}
           </div>
           <div className="rounded-lg bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-4">
             <div className="text-sm text-flextide-neutral-text-medium mb-1">Last Deal</div>
@@ -460,10 +555,10 @@ export default function CustomerDetailPage() {
                   allActivities.map((activity) => (
                     <div
                       key={activity.uuid}
-                      className="p-4 rounded-md border border-flextide-neutral-border bg-flextide-neutral-light-bg"
+                      className="p-4 rounded-md border border-flextide-neutral-border bg-flextide-neutral-light-bg relative"
                     >
                       <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap flex-1">
                           <span className="text-xs font-medium text-flextide-primary-accent">
                             {activity.type === "note" ? "Note" : "Conversation"}
                           </span>
@@ -472,14 +567,122 @@ export default function CustomerDetailPage() {
                               ({activity.source})
                             </span>
                           )}
+                          {activity.type === "note" && activity.author_name && (
+                            <span className="text-xs text-flextide-neutral-text-medium">
+                              by {activity.author_name}
+                            </span>
+                          )}
                         </div>
-                        <div className="text-xs text-flextide-neutral-text-medium">
-                          {formatDate(activity.created_at)}
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-flextide-neutral-text-medium">
+                            {formatDate(activity.created_at)}
+                          </div>
+                          {activity.type === "note" && (
+                            <>
+                              {editingNoteId === activity.uuid ? (
+                                <>
+                                  <button
+                                    onClick={handleSaveNote}
+                                    disabled={isUpdatingNote || !editingNoteText.trim()}
+                                    className="p-1 rounded hover:bg-flextide-success/10 text-flextide-success hover:text-flextide-success transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    aria-label="Save note"
+                                  >
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M5 13l4 4L19 7"
+                                      />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEdit}
+                                    disabled={isUpdatingNote}
+                                    className="p-1 rounded hover:bg-flextide-neutral-border text-flextide-neutral-text-medium hover:text-flextide-neutral-text-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    aria-label="Cancel edit"
+                                  >
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M6 18L18 6M6 6l12 12"
+                                      />
+                                    </svg>
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleEditNote(activity.uuid, activity.content)}
+                                    disabled={deletingNoteId === activity.uuid}
+                                    className="p-1 rounded hover:bg-flextide-primary-accent/10 text-flextide-primary-accent hover:text-flextide-primary-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    aria-label="Edit note"
+                                  >
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                      />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteNote(activity.uuid)}
+                                    disabled={deletingNoteId === activity.uuid}
+                                    className="p-1 rounded hover:bg-flextide-error/10 text-flextide-error hover:text-flextide-error transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    aria-label="Delete note"
+                                  >
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
+                                    </svg>
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )}
                         </div>
                       </div>
-                      <div className="text-sm text-flextide-neutral-text-dark whitespace-pre-wrap">
-                        {activity.content}
-                      </div>
+                      {editingNoteId === activity.uuid ? (
+                        <textarea
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                          className="w-full px-3 py-2 rounded-md border border-flextide-neutral-border bg-flextide-neutral-panel-bg text-flextide-neutral-text-dark focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent resize-none"
+                          rows={4}
+                          disabled={isUpdatingNote}
+                        />
+                      ) : (
+                        <div className="text-sm text-flextide-neutral-text-dark whitespace-pre-wrap">
+                          {activity.content}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -490,11 +693,24 @@ export default function CustomerDetailPage() {
                 <div className="space-y-2">
                   <textarea
                     placeholder="Add a note or conversation..."
+                    value={noteText}
+                    onChange={(e) => setNoteText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        handleAddNote();
+                      }
+                    }}
                     className="w-full px-3 py-2 rounded-md border border-flextide-neutral-border bg-flextide-neutral-panel-bg text-flextide-neutral-text-dark placeholder-flextide-neutral-text-medium focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent resize-none"
                     rows={3}
+                    disabled={isAddingNote}
                   />
-                  <button className="w-full px-4 py-2 rounded-md bg-flextide-primary text-white hover:bg-flextide-primary-accent transition-colors">
-                    Add Note
+                  <button
+                    onClick={handleAddNote}
+                    disabled={isAddingNote || !noteText.trim()}
+                    className="w-full px-4 py-2 rounded-md bg-flextide-primary text-white hover:bg-flextide-primary-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isAddingNote ? "Adding..." : "Add Note"}
                   </button>
                 </div>
               </div>

@@ -20,6 +20,7 @@ pub use customer::{
     CrmCustomer, CrmCustomerAddress, CrmCustomerConversation, CrmCustomerNote,
     CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
     CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, UpdateCrmCustomerRequest,
+    UpdateCrmCustomerNoteRequest,
 };
 
 pub fn create_router<S>() -> Router<S>

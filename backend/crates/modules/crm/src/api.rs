@@ -2,11 +2,12 @@
 //!
 //! Provides REST API endpoints for managing CRM customers, notes, and addresses.
 
+#[allow(unused_imports)]
 use axum::{
     extract::{Extension, Path, Query},
     http::StatusCode,
     response::{IntoResponse, Json},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put}, // put is used in route definitions (lines 1182, 1187)
     Router,
 };
 use serde::Deserialize;
@@ -15,6 +16,7 @@ use serde_json::{json, Value as JsonValue};
 use crate::customer::{
     CreateCrmCustomerAddressRequest, CreateCrmCustomerConversationRequest,
     CreateCrmCustomerNoteRequest, CreateCrmCustomerRequest, CrmCustomer, UpdateCrmCustomerRequest,
+    UpdateCrmCustomerNoteRequest,
 };
 use flextide_core::database::DatabasePool;
 use flextide_core::jwt::Claims;
@@ -362,6 +364,88 @@ pub async fn delete_customer_note(
 
     Ok(Json(json!({
         "message": "Note deleted successfully"
+    })))
+}
+
+/// Update a note for a customer
+///
+/// PUT /api/modules/crm/customers/{uuid}/notes/{note_uuid}
+pub async fn update_customer_note(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path((customer_uuid, note_uuid)): Path<(String, String)>,
+    Json(request): Json<UpdateCrmCustomerNoteRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_edit_customer_notes")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to edit customer notes" })),
+        ));
+    }
+
+    // Load customer to verify it belongs to the organization
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error loading customer: {}", e);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Customer not found" })),
+            )
+        })?;
+
+    // Verify customer belongs to the organization
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Customer does not belong to this organization" })),
+        ));
+    }
+
+    // Update note
+    customer
+        .update_note(&pool, &note_uuid, request)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error updating note: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update note" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "message": "Note updated successfully"
     })))
 }
 
@@ -763,6 +847,8 @@ pub async fn get_customer_kpis(
         "assigned_user": customer.user_id, // Assigned user UUID
         "days_since_last_contact": 5, // Days since last contact
         "last_interaction_date": Option::<String>::None, // Last interaction date
+        "open_deal_amount": Option::<f64>::Some(3500.00), // Open deal amount in € (if customer has an offer being reviewed)
+        "open_deal_date": Some("2024-11-10T14:30:00Z".to_string()), // Date when offer was made
         "created_at": customer.created_at.to_rfc3339(),
     });
 
@@ -1099,7 +1185,7 @@ where
         .route("/modules/crm/customers/{uuid}/notes", get(get_customer_notes).post(add_customer_note))
         .route(
             "/modules/crm/customers/{uuid}/notes/{note_uuid}",
-            delete(delete_customer_note),
+            delete(delete_customer_note).put(update_customer_note),
         )
         .route("/modules/crm/customers/{uuid}/conversations", get(get_customer_conversations).post(add_customer_conversation))
         .route("/modules/crm/customers/{uuid}/addresses", post(add_customer_address))

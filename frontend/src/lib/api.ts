@@ -381,6 +381,8 @@ export interface CrmCustomerKpis {
   assigned_user: string | null;
   days_since_last_contact: number;
   last_interaction_date: string | null;
+  open_deal_amount: number | null;
+  open_deal_date: string | null;
   created_at: string;
 }
 
@@ -389,9 +391,20 @@ export interface CrmCustomerNote {
   customer_uuid: string;
   note_text: string;
   author_id: string;
+  author_name: string | null;
   visible_to_customer: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface CreateCrmCustomerNoteRequest {
+  note_text: string;
+  visible_to_customer?: boolean;
+}
+
+export interface UpdateCrmCustomerNoteRequest {
+  note_text?: string;
+  visible_to_customer?: boolean;
 }
 
 export interface CrmCustomerConversation {
@@ -861,6 +874,119 @@ export async function updateCrmCustomer(uuid: string, data: UpdateCrmCustomerReq
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to update customer:', error);
+    throw error;
+  }
+}
+
+export async function addCrmCustomerNote(
+  customerUuid: string,
+  data: CreateCrmCustomerNoteRequest
+): Promise<CrmCustomerNote> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${customerUuid}/notes`), {
+      method: 'POST',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to add note';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to add note');
+      }
+    }
+
+    const result = await response.json();
+    // The API returns { uuid, message }, but we need to fetch the full note
+    // For now, we'll return a partial note and let the page refresh
+    return {
+      uuid: result.uuid,
+      customer_uuid: customerUuid,
+      note_text: data.note_text,
+      author_id: '', // Will be filled by backend
+      author_name: null, // Will be filled when we refresh notes
+      visible_to_customer: data.visible_to_customer ?? false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to add note:', error);
+    throw error;
+  }
+}
+
+export async function updateCrmCustomerNote(
+  customerUuid: string,
+  noteUuid: string,
+  data: UpdateCrmCustomerNoteRequest
+): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${customerUuid}/notes/${noteUuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to update note';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to update note');
+      }
+    }
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update note:', error);
+    throw error;
+  }
+}
+
+export async function deleteCrmCustomerNote(
+  customerUuid: string,
+  noteUuid: string
+): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/crm/customers/${customerUuid}/notes/${noteUuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders('/api/modules/crm/customers'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to delete note';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to delete note');
+      }
+    }
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete note:', error);
     throw error;
   }
 }
