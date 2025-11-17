@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
+import { logout, listOwnOrganizations, type Organization, getIntegrations, type Integration } from "@/lib/api";
 import { removeToken, getTokenPayload, isServerAdmin, isAuthenticated } from "@/lib/auth";
 import { getCurrentOrganizationUuid, setCurrentOrganizationUuid } from "@/lib/organization";
 import { useTheme } from "@/components/common/ThemeProvider";
@@ -31,12 +31,19 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-const menuItems: MenuItem[] = [
+const baseMenuItems: MenuItem[] = [
   { label: "Home", href: "/" },
   { label: "AI Coworkers", href: "/ai-coworkers" },
   { label: "Workflows", href: "/workflows" },
   { label: "Executions", href: "/executions" },
-  { label: "Services", href: "/services" },
+  {
+    label: "Services",
+    href: "/services",
+    children: [
+      { label: "E-Mail Receiver", href: "/services/email-receiver" },
+      { label: "E-Mail Sender", href: "/services/email-sender" },
+    ],
+  },
   {
     label: "Modules",
     href: "/modules",
@@ -80,6 +87,7 @@ export function Header() {
   const [userInitial, setUserInitial] = useState<string>("U");
   const initializedRef = useRef(false);
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
 
   // Get user initial on client side only
   useEffect(() => {
@@ -157,7 +165,55 @@ export function Header() {
     loadPermissions();
   }, [currentOrgUuid]);
 
+  // Fetch integrations on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      return;
+    }
+
+    async function fetchIntegrations() {
+      try {
+        const integrationsList = await getIntegrations();
+        setIntegrations(integrationsList);
+      } catch (error) {
+        console.error("Failed to fetch integrations:", error);
+      }
+    }
+
+    fetchIntegrations();
+  }, []);
+
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
+
+  // Build menu items with dynamic integrations
+  const menuItems: MenuItem[] = (() => {
+    const items = [...baseMenuItems];
+    
+    // Find Services index and insert Integrations after it
+    const servicesIndex = items.findIndex(item => item.label === "Services");
+    if (servicesIndex !== -1) {
+      // Build integrations menu children
+      const integrationChildren: MenuItem[] = integrations.map(integration => ({
+        label: integration.name,
+        href: integration.route,
+      }));
+      
+      // Add "Add new integration" as last entry
+      integrationChildren.push({
+        label: "Add new integration",
+        href: "/integrations/new",
+      });
+
+      // Insert Integrations menu after Services
+      items.splice(servicesIndex + 1, 0, {
+        label: "Integrations",
+        href: "/integrations",
+        children: integrationChildren,
+      });
+    }
+    
+    return items;
+  })();
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -267,19 +323,37 @@ export function Header() {
                 {/* Submenu */}
                 {item.children && activeSubmenu === item.href && (
                   <div className="absolute left-0 mt-1 w-48 rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border shadow-lg py-1">
-                    {item.children.map((child) => (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        className={`block px-4 py-2 text-sm transition-colors ${
-                          isActive(child.href)
-                            ? "bg-flextide-primary text-white"
-                            : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
-                        }`}
-                      >
-                        {child.label}
-                      </Link>
-                    ))}
+                    {item.children.map((child, index) => {
+                      const isAddNew = child.label === "Add new integration";
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={`block px-4 py-2 text-sm transition-colors flex items-center gap-2 ${
+                            isActive(child.href)
+                              ? "bg-flextide-primary text-white"
+                              : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
+                          } ${isAddNew && index === item.children!.length - 1 ? "border-t border-flextide-neutral-border mt-1 pt-2" : ""}`}
+                        >
+                          {isAddNew && (
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 4v16m8-8H4"
+                              />
+                            </svg>
+                          )}
+                          {child.label}
+                        </Link>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -305,20 +379,38 @@ export function Header() {
                     </Link>
                     {item.children && (
                       <div className="pl-4 mt-1 space-y-1">
-                        {item.children.map((child) => (
-                          <Link
-                            key={child.href}
-                            href={child.href}
-                            onClick={() => setMobileMenuOpen(false)}
-                            className={`block px-3 py-2 rounded-md text-sm ${
-                              isActive(child.href)
-                                ? "bg-flextide-primary text-white"
-                                : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
-                            }`}
-                          >
-                            {child.label}
-                          </Link>
-                        ))}
+                        {item.children.map((child, index) => {
+                          const isAddNew = child.label === "Add new integration";
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              onClick={() => setMobileMenuOpen(false)}
+                              className={`block px-3 py-2 rounded-md text-sm flex items-center gap-2 ${
+                                isActive(child.href)
+                                  ? "bg-flextide-primary text-white"
+                                  : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
+                              } ${isAddNew && index === item.children!.length - 1 ? "border-t border-flextide-neutral-border mt-1 pt-2" : ""}`}
+                            >
+                              {isAddNew && (
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 4v16m8-8H4"
+                                  />
+                                </svg>
+                              )}
+                              {child.label}
+                            </Link>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

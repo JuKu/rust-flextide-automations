@@ -1054,6 +1054,45 @@ export interface LastExecutionsResponse {
   total_pages: number;
 }
 
+export interface Integration {
+  name: string;
+  route: string;
+}
+
+/**
+ * Get activated integrations
+ */
+export async function getIntegrations(): Promise<Integration[]> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations'),
+    });
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch integrations';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch integrations');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch integrations:', error);
+    throw error;
+  }
+}
+
 export async function getLastExecutions(
   page: number = 1,
   limit: number = 30

@@ -326,6 +326,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/permissions", get(get_permissions))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .route("/api/executions/last-executions", get(get_last_executions))
+        .route("/api/integrations", get(get_integrations))
         .nest("/api", flextide_modules_crm::create_router())
         .layer(
             ServiceBuilder::new()
@@ -1308,4 +1309,32 @@ pub async fn edit_workflow_title(
         "workflow_uuid": workflow_uuid,
         "title": payload.title
     })))
+}
+
+/// Get activated integrations
+///
+/// GET /api/integrations
+/// Returns a list of activated integrations with their frontend routes
+pub async fn get_integrations(
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Default activated integrations
+    let integrations = json!([
+        {
+            "name": "JIRA",
+            "route": "/integrations/jira/overview"
+        },
+        {
+            "name": "GitHub Issues",
+            "route": "/integrations/github-issues/overview"
+        },
+        {
+            "name": "OpenAI",
+            "route": "/integrations/openai/overview"
+        }
+    ]);
+
+    Ok(Json(integrations))
 }
