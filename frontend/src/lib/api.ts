@@ -1059,6 +1059,124 @@ export interface Integration {
   route: string;
 }
 
+export interface IntegrationDetail {
+  uuid: string;
+  title: string;
+  description: string;
+  activated: boolean;
+  purchased: boolean;
+  author_name: string;
+  author_url: string;
+  created_at: string;
+  updated_at: string;
+  version: string;
+  verified: boolean;
+  third_party: boolean;
+  image_url: string | null;
+  image_description: string | null;
+  rating: number;
+  configuration_url: string;
+  pricing_type: "free" | "one_time" | "subscription";
+}
+
+export interface IntegrationsListResponse {
+  integrations: IntegrationDetail[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+/**
+ * List all available integrations with pagination
+ */
+export async function listIntegrations(
+  page: number = 1,
+  limit: number = 20
+): Promise<IntegrationsListResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    const response = await fetch(
+      getApiEndpoint(`/api/integrations/list?${params.toString()}`),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/integrations/list'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch integrations';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch integrations');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch integrations:', error);
+    throw error;
+  }
+}
+
+/**
+ * Search integrations
+ */
+export async function searchIntegrations(
+  query: string,
+  page: number = 1,
+  limit: number = 20
+): Promise<IntegrationsListResponse> {
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    const response = await fetch(
+      getApiEndpoint(`/api/integrations/search?${params.toString()}`),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/integrations/search'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to search integrations';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to search integrations');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to search integrations:', error);
+    throw error;
+  }
+}
+
 /**
  * Get activated integrations
  */

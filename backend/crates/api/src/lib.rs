@@ -327,6 +327,8 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
         .route("/api/executions/last-executions", get(get_last_executions))
         .route("/api/integrations", get(get_integrations))
+        .route("/api/integrations/list", get(list_integrations))
+        .route("/api/integrations/search", get(search_integrations))
         .nest("/api", flextide_modules_crm::create_router())
         .layer(
             ServiceBuilder::new()
@@ -1337,4 +1339,279 @@ pub async fn get_integrations(
     ]);
 
     Ok(Json(integrations))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListIntegrationsQuery {
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+/// List all available integrations with pagination
+///
+/// GET /api/integrations/list?page=1&limit=20
+/// Returns a paginated list of all integrations (activated and not activated)
+pub async fn list_integrations(
+    Query(query): Query<ListIntegrationsQuery>,
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let page = query.page.max(1);
+    let limit = query.limit.min(100).max(1);
+    let offset = (page - 1) * limit;
+
+    // Mock data - in production, this would come from database
+    // This includes all available integrations
+    let all_integrations = vec![
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440001",
+            "title": "JIRA",
+            "description": "Integrate with JIRA to create, update, and manage issues. Track project progress and automate workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-12-01T14:30:00Z",
+            "version": "1.0.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.5,
+            "configuration_url": "/integrations/jira/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440002",
+            "title": "GitHub Issues",
+            "description": "Connect to GitHub to manage issues, pull requests, and repositories. Automate your development workflow.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-02-01T09:00:00Z",
+            "updated_at": "2024-11-15T16:20:00Z",
+            "version": "1.2.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.8,
+            "configuration_url": "/integrations/github-issues/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440003",
+            "title": "OpenAI",
+            "description": "Integrate OpenAI's GPT models for AI-powered automation. Generate content, analyze data, and create intelligent workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-03-10T11:00:00Z",
+            "updated_at": "2024-12-10T10:15:00Z",
+            "version": "2.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 5.0,
+            "configuration_url": "/integrations/openai/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440008",
+            "title": "Google Sheets",
+            "description": "Read and write data to Google Sheets. Automate spreadsheet operations and data synchronization.",
+            "activated": false,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-08-15T09:00:00Z",
+            "updated_at": "2024-12-08T10:00:00Z",
+            "version": "1.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.4,
+            "configuration_url": "/integrations/google-sheets/overview",
+            "pricing_type": "free"
+        }),
+    ];
+
+    let total = all_integrations.len() as u32;
+    let start = offset as usize;
+    let end = (offset + limit) as usize;
+    let paginated_integrations: Vec<Value> = all_integrations
+        .into_iter()
+        .skip(start)
+        .take((end - start).min(limit as usize))
+        .collect();
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+    Ok(Json(json!({
+        "integrations": paginated_integrations,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchIntegrationsQuery {
+    pub q: String,
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+/// Search integrations
+///
+/// GET /api/integrations/search?q=query&page=1&limit=20
+/// Returns a paginated list of integrations matching the search query
+pub async fn search_integrations(
+    Query(query): Query<SearchIntegrationsQuery>,
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let search_query = query.q.trim().to_lowercase();
+    
+    if search_query.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Search query cannot be empty" })),
+        ));
+    }
+
+    let page = query.page.max(1);
+    let limit = query.limit.min(100).max(1);
+    let offset = (page - 1) * limit;
+
+    // Mock data - same as list_integrations
+    let all_integrations = vec![
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440001",
+            "title": "JIRA",
+            "description": "Integrate with JIRA to create, update, and manage issues. Track project progress and automate workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-12-01T14:30:00Z",
+            "version": "1.0.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.5,
+            "configuration_url": "/integrations/jira/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440002",
+            "title": "GitHub Issues",
+            "description": "Connect to GitHub to manage issues, pull requests, and repositories. Automate your development workflow.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-02-01T09:00:00Z",
+            "updated_at": "2024-11-15T16:20:00Z",
+            "version": "1.2.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.8,
+            "configuration_url": "/integrations/github-issues/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440003",
+            "title": "OpenAI",
+            "description": "Integrate OpenAI's GPT models for AI-powered automation. Generate content, analyze data, and create intelligent workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-03-10T11:00:00Z",
+            "updated_at": "2024-12-10T10:15:00Z",
+            "version": "2.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 5.0,
+            "configuration_url": "/integrations/openai/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440008",
+            "title": "Google Sheets",
+            "description": "Read and write data to Google Sheets. Automate spreadsheet operations and data synchronization.",
+            "activated": false,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-08-15T09:00:00Z",
+            "updated_at": "2024-12-08T10:00:00Z",
+            "version": "1.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.4,
+            "configuration_url": "/integrations/google-sheets/overview",
+            "pricing_type": "free"
+        }),
+    ];
+
+    // Filter integrations by search query (search in title and description)
+    let filtered: Vec<Value> = all_integrations
+        .into_iter()
+        .filter(|integration| {
+            let title = integration.get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let description = integration.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            title.contains(&search_query) || description.contains(&search_query)
+        })
+        .collect();
+
+    let total = filtered.len() as u32;
+    let start = offset as usize;
+    let end = (offset + limit) as usize;
+    let paginated_integrations: Vec<Value> = filtered
+        .into_iter()
+        .skip(start)
+        .take((end - start).min(limit as usize))
+        .collect();
+
+    let total_pages = if total > 0 {
+        ((total as f64) / (limit as f64)).ceil() as u32
+    } else {
+        0
+    };
+
+    Ok(Json(json!({
+        "integrations": paginated_integrations,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    })))
 }
