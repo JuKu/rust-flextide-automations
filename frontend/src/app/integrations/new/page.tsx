@@ -257,7 +257,7 @@ export default function NewIntegrationsPage() {
             Browse and install integrations to extend your workflow automation capabilities.
           </p>
           <p className="text-xs text-flextide-neutral-text-medium italic">
-            Disclaimer: Flextide can offer integrations for third-party software (e.g., to enable access via their API within workflows), but is not necessarily affiliated with this software, and the names of the apps or integrations may also be protected by trademark law, etc.
+            Disclaimer: Flextide can offer integrations for third-party software (e.g., to enable access via their API within workflows), but is not necessarily affiliated or partnered with this software, and the names of the apps or integrations may also be protected by trademark law, etc.
           </p>
         </div>
 
