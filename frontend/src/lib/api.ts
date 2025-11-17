@@ -1032,3 +1032,66 @@ export async function deleteCrmCustomerNote(
   }
 }
 
+// Executions API types and functions
+export interface Execution {
+  uuid: string;
+  short_uuid: string;
+  status: string;
+  workflow_name: string;
+  workflow_uuid: string;
+  started_at: string;
+  finished_at: string | null;
+  trigger_type: string;
+  credits_used: number;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface LastExecutionsResponse {
+  executions: Execution[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export async function getLastExecutions(
+  page: number = 1,
+  limit: number = 30
+): Promise<LastExecutionsResponse> {
+  try {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    const response = await fetch(
+      getApiEndpoint(`/api/executions/last-executions?${params.toString()}`),
+      {
+        method: 'GET',
+        headers: getApiHeaders('/api/executions/last-executions'),
+      }
+    );
+
+    if (!response.ok) {
+      try {
+        const error: ApiError = await response.json();
+        const errorMessage = error.error || 'Failed to fetch executions';
+        await handleOrganizationMembershipError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to fetch executions');
+      }
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch executions:', error);
+    throw error;
+  }
+}
+

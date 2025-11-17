@@ -171,3 +171,6 @@ backend/.env
 
 # sqlx cache (generated files, not needed in version control)
 backend/migrations/.sqlx/
+
+docs/*RESEARCH.md
+docs/research/*Core_API.md

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, Path, Request, State},
+    extract::{Extension, Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Response},
@@ -325,6 +325,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/organizations/create", post(create_organization))
         .route("/api/permissions", get(get_permissions))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
+        .route("/api/executions/last-executions", get(get_last_executions))
         .nest("/api", flextide_modules_crm::create_router())
         .layer(
             ServiceBuilder::new()
@@ -723,6 +724,24 @@ pub async fn create_organization(
                     )
                 })?;
 
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES (?, ?, 'super_admin')
+                 ON DUPLICATE KEY UPDATE permission_name = permission_name",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
+
             tx.commit().await.map_err(|e| {
                 tracing::error!("Failed to commit transaction: {}", e);
                 (
@@ -768,6 +787,24 @@ pub async fn create_organization(
                         Json(json!({ "error": "Failed to add user as owner" })),
                     )
                 })?;
+
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES ($1, $2, 'super_admin')
+                 ON CONFLICT (user_id, organization_uuid, permission_name) DO NOTHING",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
 
             tx.commit().await.map_err(|e| {
                 tracing::error!("Failed to commit transaction: {}", e);
@@ -815,6 +852,23 @@ pub async fn create_organization(
                     )
                 })?;
 
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT OR IGNORE INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES (?1, ?2, 'super_admin')",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
+
             tx.commit().await.map_err(|e| {
                 tracing::error!("Failed to commit transaction: {}", e);
                 (
@@ -826,7 +880,7 @@ pub async fn create_organization(
     }
 
     tracing::info!(
-        "Organization '{}' created successfully with UUID {} for user {}",
+        "Organization '{}' created successfully with UUID {} for user {}. User granted super_admin permission.",
         name,
         org_uuid,
         claims.user_uuid
@@ -872,6 +926,311 @@ pub async fn get_permissions(
         "user_uuid": claims.user_uuid,
         "organization_uuid": org_uuid
     })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LastExecutionsQuery {
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+fn default_page() -> u32 {
+    1
+}
+
+fn default_limit() -> u32 {
+    30
+}
+
+/// Helper function to extract execution data from a database row
+/// Works with all database types (MySQL, PostgreSQL, SQLite)
+fn extract_execution_from_row<R: Row>(row: R) -> ExecutionResponse
+where
+    usize: sqlx::ColumnIndex<R>,
+    for<'r> &'r str: sqlx::ColumnIndex<R>,
+    for<'r> String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Option<String>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Value: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Option<Value>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    let uuid: String = row.get(0usize);
+    let status: String = row.get(1usize);
+    let workflow_name: String = row.get(2usize);
+    let workflow_uuid: String = row.get(3usize);
+    let started_at: String = row.get(4usize);
+    // Handle NULL dates - DATE_FORMAT/TO_CHAR return NULL for NULL input
+    // Use try_get to safely handle NULL values
+    let finished_at: Option<String> = row.try_get::<Option<String>, _>(5usize)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let trigger_type: String = row.get(6usize);
+    
+    // Handle JSON metadata - try to get as Value first, then as String
+    let metadata_value: Option<Value> = row
+        .try_get::<Option<Value>, _>(7usize)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            row.try_get::<Option<String>, _>(7usize)
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        });
+
+    // Create short UUID (first 8 characters)
+    let short_uuid = uuid.chars().take(8).collect::<String>();
+
+    ExecutionResponse {
+        uuid,
+        short_uuid,
+        status,
+        workflow_name,
+        workflow_uuid,
+        started_at,
+        finished_at,
+        trigger_type,
+        credits_used: 0, // TODO: Add credits tracking
+        metadata: metadata_value,
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecutionResponse {
+    pub uuid: String,
+    pub short_uuid: String,
+    pub status: String,
+    pub workflow_name: String,
+    pub workflow_uuid: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub trigger_type: String,
+    pub credits_used: i64, // TODO: Add credits tracking later, defaulting to 0
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LastExecutionsResponse {
+    pub executions: Vec<ExecutionResponse>,
+    pub total: i64,
+    pub page: u32,
+    pub limit: u32,
+    pub total_pages: u32,
+}
+
+/// Get last executions for the organization
+///
+/// GET /api/executions/last-executions?page=1&limit=30
+pub async fn get_last_executions(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Query(query): Query<LastExecutionsQuery>,
+) -> Result<Json<LastExecutionsResponse>, (StatusCode, Json<Value>)> {
+    use flextide_core::database::DatabasePool;
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "can_see_last_executions",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to see last executions"
+            })),
+        ));
+    }
+
+    // Validate limit (max 50)
+    let limit = query.limit.min(50).max(1);
+    let page = query.page.max(1);
+    let offset = (page - 1) * limit;
+
+    // Get total count
+    let total = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = ?"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = $1"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = ?1"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+    }
+    .map_err(|e| {
+        tracing::error!("Failed to count executions: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to fetch executions" })),
+        )
+    })?;
+
+    // Fetch executions with workflow name
+    // Using a helper function to handle different database types
+    let execution_responses: Vec<ExecutionResponse> = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    DATE_FORMAT(r.started_at, '%Y-%m-%d %H:%i:%s') as started_at,
+                    DATE_FORMAT(r.finished_at, '%Y-%m-%d %H:%i:%s') as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = ?
+                 ORDER BY r.created_at DESC
+                 LIMIT ? OFFSET ?"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    TO_CHAR(r.started_at, 'YYYY-MM-DD HH24:MI:SS') as started_at,
+                    TO_CHAR(r.finished_at, 'YYYY-MM-DD HH24:MI:SS') as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = $1
+                 ORDER BY r.created_at DESC
+                 LIMIT $2 OFFSET $3"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    strftime('%Y-%m-%d %H:%M:%S', r.started_at) as started_at,
+                    strftime('%Y-%m-%d %H:%M:%S', r.finished_at) as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = ?1
+                 ORDER BY r.created_at DESC
+                 LIMIT ?2 OFFSET ?3"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+    };
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+    Ok(Json(LastExecutionsResponse {
+        executions: execution_responses,
+        total,
+        page,
+        limit,
+        total_pages,
+    }))
 }
 
 #[derive(Debug, Deserialize)]

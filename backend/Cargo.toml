@@ -18,7 +18,9 @@ members = [
     "crates/worker",
     "crates/sdk",
     "crates/node_registry",
-    "crates/modules/crm"
+    "crates/node_stdlib",
+    "crates/modules/crm",
+    "crates/integrations"
 ]
 resolver = "3"
 

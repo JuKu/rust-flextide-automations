@@ -411,7 +411,8 @@ pub async fn list_user_permissions(
     match pool {
         DatabasePool::MySql(p) => {
             let rows = sqlx::query(
-                "SELECT user_id, organization_uuid, permission_name, created_at
+                "SELECT user_id, organization_uuid, permission_name, 
+                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at
                  FROM user_permissions
                  WHERE user_id = ? AND organization_uuid = ?
                  ORDER BY created_at DESC",
@@ -426,13 +427,14 @@ pub async fn list_user_permissions(
                     user_id: row.get("user_id"),
                     organization_uuid: row.get("organization_uuid"),
                     permission_name: row.get("permission_name"),
-                    created_at: row.get::<String, _>("created_at"),
+                    created_at: row.get("created_at"),
                 });
             }
         }
         DatabasePool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT user_id, organization_uuid, permission_name, created_at
+                "SELECT user_id, organization_uuid, permission_name, 
+                        TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at
                  FROM user_permissions
                  WHERE user_id = $1 AND organization_uuid = $2
                  ORDER BY created_at DESC",
@@ -447,13 +449,14 @@ pub async fn list_user_permissions(
                     user_id: row.get("user_id"),
                     organization_uuid: row.get("organization_uuid"),
                     permission_name: row.get("permission_name"),
-                    created_at: row.get::<String, _>("created_at"),
+                    created_at: row.get("created_at"),
                 });
             }
         }
         DatabasePool::Sqlite(p) => {
             let rows = sqlx::query(
-                "SELECT user_id, organization_uuid, permission_name, created_at
+                "SELECT user_id, organization_uuid, permission_name, 
+                        strftime('%Y-%m-%d %H:%M:%S', created_at) as created_at
                  FROM user_permissions
                  WHERE user_id = ?1 AND organization_uuid = ?2
                  ORDER BY created_at DESC",
@@ -468,7 +471,7 @@ pub async fn list_user_permissions(
                     user_id: row.get("user_id"),
                     organization_uuid: row.get("organization_uuid"),
                     permission_name: row.get("permission_name"),
-                    created_at: row.get::<String, _>("created_at"),
+                    created_at: row.get("created_at"),
                 });
             }
         }
