@@ -1,0 +1,11 @@
+[package]
+name = "node-stdlib"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+flextide-sdk = { path = "../sdk" }
+flextide-core = { path = "../flextide-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+
