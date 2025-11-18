@@ -1,0 +1,510 @@
+---
+alwaysApply: false
+description: Defines sqlx testing best practices, database isolation strategies, and test setup patterns for Rust applications using sqlx.
+---
+
+# SQLx Testing Best Practices
+
+## Overview
+
+This document outlines best practices for writing tests with sqlx, focusing on database isolation, test setup, and maintaining test reliability.
+
+## Database Isolation Strategies
+
+### Recommended Approach: One Database Per Test
+
+**Use a separate logical database for each test** rather than sharing a single database or using transactions. This approach provides:
+
+- **True isolation**: Tests cannot interfere with each other
+- **Parallel execution**: Tests can run concurrently without conflicts
+- **Realistic environment**: Tests run against actual database state, not mocked behavior
+- **Simpler code**: No need to handle transaction rollbacks or savepoints
+
+### Why Not Transactions?
+
+While using transactions for test isolation seems appealing, it has significant drawbacks:
+
+1. **Nested transaction complexity**: Requires converting `COMMIT` statements to `SAVEPOINT` statements
+2. **Database compatibility**: Not all databases support nested transactions
+3. **Type system complexity**: Rust's type system makes it difficult to write code that accepts both transactions and regular connections
+4. **Real-world accuracy**: Production code doesn't run in transactions, so tests should reflect that
+
+### Why Not In-Memory Databases?
+
+In-memory databases (like SQLite in-memory) have limitations:
+
+- **Different behavior**: SQLite behaves differently than PostgreSQL/MySQL
+- **Feature gaps**: Missing features like proper foreign key constraints, full-text search, etc.
+- **False confidence**: Tests pass but production fails due to database differences
+
+## Using `#[sqlx::test]`
+
+The `#[sqlx::test]` attribute macro provides automatic test database management.
+
+### Basic Usage
+
+```rust
+use sqlx::{PgPool, Row};
+
+#[sqlx::test]
+async fn basic_test(pool: PgPool) -> sqlx::Result<()> {
+    let mut conn = pool.acquire().await?;
+    
+    let result = sqlx::query("SELECT * FROM users WHERE id = $1")
+        .bind(1)
+        .fetch_one(&mut conn)
+        .await?;
+    
+    assert_eq!(result.get::<String, _>("email"), "test@example.com");
+    
+    Ok(())
+}
+```
+
+### Supported Function Signatures
+
+The following function signatures are supported:
+
+1. **`async fn(Pool<DB>) -> Ret`**
+   - Most common pattern
+   - All tests share a single connection limit to avoid exceeding server limits
+
+2. **`async fn(PoolConnection<DB>) -> Ret`**
+   - Direct connection instead of pool
+   - Useful when you need a single connection
+
+3. **`async fn(PoolOptions<DB>, impl ConnectOptions<DB>) -> Ret`**
+   - Full control over pool configuration
+   - Use when you need custom pool settings or callbacks
+
+Where `DB` is a supported database type (`Postgres`, `MySql`, `Sqlite`) and `Ret` is `()` or `Result<_, _>`.
+
+### Supported Databases
+
+| Database | Requires DATABASE_URL | Notes |
+|----------|----------------------|-------|
+| PostgreSQL | Yes | Needs superuser connection for database creation |
+| MySQL | Yes | Needs superuser connection for database creation |
+| SQLite | No | Defaults to `target/sqlx/test-dbs/<path>.sqlite` |
+
+For PostgreSQL and MySQL, set `DATABASE_URL` in environment or `.env` file:
+- **PostgreSQL**: `postgres://username:password@localhost/database_name`
+- **MySQL**: `mysql://username:password@localhost/database_name`
+
+SQLite test databases are created automatically in `target/sqlx/test-dbs/` with paths based on test function names.
+
+## Automatic Migrations
+
+When using the `migrate` feature, `#[sqlx::test]` automatically applies migrations before each test.
+
+### Default Behavior
+
+Migrations are automatically discovered from the `migrations` directory relative to `CARGO_MANIFEST_DIR` (the directory containing `Cargo.toml`).
+
+### Custom Migration Path
+
+```rust
+#[sqlx::test(migrations = "custom_migrations")]
+async fn test_with_custom_migrations(pool: PgPool) -> sqlx::Result<()> {
+    // Test code here
+    Ok(())
+}
+```
+
+### Using Embedded Migrator
+
+If migrations are embedded in your crate:
+
+```rust
+// In your crate's lib.rs
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("migrations");
+
+// In tests
+#[sqlx::test(migrator = "my_crate::MIGRATOR")]
+async fn test_with_embedded_migrator(pool: PgPool) -> sqlx::Result<()> {
+    // Test code here
+    Ok(())
+}
+```
+
+### Disabling Migrations
+
+```rust
+#[sqlx::test(migrations = false)]
+async fn test_without_migrations(pool: PgPool) -> sqlx::Result<()> {
+    // Manually create tables or use fixtures
+    pool.execute("CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT)").await?;
+    Ok(())
+}
+```
+
+## Test Fixtures
+
+Fixtures are SQL scripts that insert test data. They're applied after migrations but before your test runs.
+
+### Using Fixtures
+
+```rust
+// Option 1: Files in ./fixtures directory
+#[sqlx::test(fixtures("users", "posts"))]
+async fn test_with_fixtures(pool: PgPool) -> sqlx::Result<()> {
+    // Test code - users and posts data already loaded
+    Ok(())
+}
+
+// Option 2: Explicit file paths
+#[sqlx::test(fixtures("./fixtures/users.sql", "./fixtures/posts.sql"))]
+async fn test_with_explicit_paths(pool: PgPool) -> sqlx::Result<()> {
+    Ok(())
+}
+
+// Option 3: Custom path with scripts
+#[sqlx::test(fixtures(path = "./test_data", scripts("users", "posts")))]
+async fn test_with_custom_path(pool: PgPool) -> sqlx::Result<()> {
+    Ok(())
+}
+```
+
+### Fixture Ordering
+
+Fixtures are applied in the order specified. Ensure foreign key dependencies are satisfied:
+
+```rust
+// Correct order: users before posts (posts references users)
+#[sqlx::test(fixtures("users", "posts"))]
+async fn test_posts(pool: PgPool) -> sqlx::Result<()> {
+    Ok(())
+}
+```
+
+### Multiple Fixture Attributes
+
+You can combine different fixture modes:
+
+```rust
+#[sqlx::test(
+    fixtures("users", "posts"),
+    fixtures(path = "./custom", scripts("comments"))
+)]
+async fn test_combined_fixtures(pool: PgPool) -> sqlx::Result<()> {
+    Ok(())
+}
+```
+
+## Test Database Cleanup
+
+- **Successful tests**: Databases are automatically deleted after the test completes
+- **Failed tests**: Databases are left in place to facilitate debugging
+- **Previous test databases**: Any previously created test databases are deleted when a test binary using `#[sqlx::test]` runs
+
+**Note**: Panics are always considered failures, even for `#[should_panic]` tests.
+
+## Manual Test Setup (Alternative Approach)
+
+If `#[sqlx::test]` doesn't fit your needs, you can manually set up test databases:
+
+### Example: Shared Test Helper
+
+```rust
+// tests/common/mod.rs
+use sqlx::{Pool, Postgres};
+
+pub async fn create_test_pool() -> Pool<Postgres> {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set");
+    
+    // Create a unique database name for this test
+    let test_db_name = format!("test_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+    
+    // Connect to postgres database to create test database
+    let admin_pool = Pool::<Postgres>::connect(&database_url).await
+        .expect("Failed to connect to database");
+    
+    // Create test database
+    sqlx::query(&format!("CREATE DATABASE {}", test_db_name))
+        .execute(&admin_pool)
+        .await
+        .expect("Failed to create test database");
+    
+    // Connect to test database
+    let test_url = database_url.replace("/postgres", &format!("/{}", test_db_name));
+    let test_pool = Pool::<Postgres>::connect(&test_url).await
+        .expect("Failed to connect to test database");
+    
+    // Run migrations
+    sqlx::migrate!("./migrations")
+        .run(&test_pool)
+        .await
+        .expect("Failed to run migrations");
+    
+    test_pool
+}
+
+pub async fn cleanup_test_database(pool: Pool<Postgres>) {
+    let database_url = pool.connect_options().get_url();
+    let db_name = database_url.path_segments()
+        .and_then(|mut segs| segs.next_back())
+        .expect("Invalid database URL");
+    
+    // Close all connections
+    pool.close().await;
+    
+    // Connect to postgres to drop test database
+    let admin_url = database_url.to_string().replace(&format!("/{}", db_name), "/postgres");
+    let admin_pool = Pool::<Postgres>::connect(&admin_url).await
+        .expect("Failed to connect to admin database");
+    
+    // Terminate connections to test database
+    sqlx::query(&format!(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1",
+    ))
+    .bind(db_name)
+    .execute(&admin_pool)
+    .await
+    .ok();
+    
+    // Drop test database
+    sqlx::query(&format!("DROP DATABASE IF EXISTS {}", db_name))
+        .execute(&admin_pool)
+        .await
+        .ok();
+}
+```
+
+### Using Manual Setup in Tests
+
+```rust
+#[tokio::test]
+async fn test_example() {
+    let pool = common::create_test_pool().await;
+    
+    // Your test code here
+    
+    // Cleanup (optional - can be done in Drop trait)
+    common::cleanup_test_database(pool).await;
+}
+```
+
+## Best Practices
+
+### 1. Use `#[sqlx::test]` When Possible
+
+Prefer `#[sqlx::test]` over manual setup for simplicity and consistency.
+
+### 2. Keep Tests Isolated
+
+- Each test should have its own database
+- Don't share state between tests
+- Use fixtures for common test data
+
+### 3. Use Fixtures for Test Data
+
+Instead of manually inserting data in each test:
+
+```rust
+// Good: Use fixtures
+#[sqlx::test(fixtures("users"))]
+async fn test_user_operations(pool: PgPool) -> sqlx::Result<()> {
+    // Users already loaded from fixture
+    Ok(())
+}
+
+// Avoid: Manual data insertion in every test
+#[sqlx::test]
+async fn test_user_operations(pool: PgPool) -> sqlx::Result<()> {
+    sqlx::query("INSERT INTO users (email) VALUES ($1)")
+        .bind("test@example.com")
+        .execute(&pool)
+        .await?;
+    // Test code...
+    Ok(())
+}
+```
+
+### 4. Test Realistic Scenarios
+
+- Test with actual database constraints
+- Use real foreign key relationships
+- Test error cases (duplicate keys, null violations, etc.)
+
+### 5. Use Transactions Within Tests When Appropriate
+
+While test isolation uses separate databases, you can still use transactions within a test for atomicity:
+
+```rust
+#[sqlx::test]
+async fn test_transaction_rollback(pool: PgPool) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    
+    sqlx::query("INSERT INTO users (email) VALUES ($1)")
+        .bind("test@example.com")
+        .execute(&mut tx)
+        .await?;
+    
+    // Rollback - changes won't persist
+    tx.rollback().await?;
+    
+    // Verify user doesn't exist
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await?;
+    
+    assert_eq!(count, 0);
+    
+    Ok(())
+}
+```
+
+### 6. Handle Database-Specific Differences
+
+When testing with multiple databases, use conditional compilation or feature flags:
+
+```rust
+#[sqlx::test]
+async fn test_cross_database(pool: Pool<DB>) -> sqlx::Result<()> {
+    #[cfg(feature = "postgres")]
+    {
+        // PostgreSQL-specific test code
+    }
+    
+    #[cfg(feature = "mysql")]
+    {
+        // MySQL-specific test code
+    }
+    
+    Ok(())
+}
+```
+
+### 7. Use Helper Functions for Common Operations
+
+```rust
+// tests/common/mod.rs
+pub async fn create_test_user(pool: &PgPool, email: &str) -> sqlx::Result<Uuid> {
+    let id = sqlx::query_scalar(
+        "INSERT INTO users (email) VALUES ($1) RETURNING id"
+    )
+    .bind(email)
+    .fetch_one(pool)
+    .await?;
+    
+    Ok(id)
+}
+
+// In tests
+#[sqlx::test]
+async fn test_user_creation(pool: PgPool) -> sqlx::Result<()> {
+    let user_id = common::create_test_user(&pool, "test@example.com").await?;
+    // Test code...
+    Ok(())
+}
+```
+
+### 8. Test Error Cases
+
+Don't just test happy paths:
+
+```rust
+#[sqlx::test]
+#[should_panic(expected = "duplicate key")]
+async fn test_duplicate_email(pool: PgPool) {
+    sqlx::query("INSERT INTO users (email) VALUES ($1)")
+        .bind("test@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+    
+    // This should fail
+    sqlx::query("INSERT INTO users (email) VALUES ($1)")
+        .bind("test@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+```
+
+### 9. Use SQLite for Fast Unit Tests
+
+For simple unit tests that don't require PostgreSQL/MySQL features, use SQLite:
+
+```rust
+#[sqlx::test]
+async fn test_simple_query(pool: sqlx::SqlitePool) -> sqlx::Result<()> {
+    // Fast, no external database required
+    Ok(())
+}
+```
+
+### 10. Parallel Test Execution
+
+With `#[sqlx::test]`, tests automatically run in parallel. Ensure:
+
+- Tests don't depend on execution order
+- Each test is fully isolated
+- No shared external resources (files, ports, etc.)
+
+## Common Patterns
+
+### Testing API Endpoints with Database
+
+```rust
+use axum_test::TestServer;
+use sqlx::PgPool;
+
+#[sqlx::test]
+async fn test_create_user_endpoint(pool: PgPool) -> sqlx::Result<()> {
+    let app = create_app(pool.clone()).await;
+    let server = TestServer::new(app).unwrap();
+    
+    let response = server
+        .post("/api/users")
+        .json(&json!({
+            "email": "test@example.com",
+            "name": "Test User"
+        }))
+        .await;
+    
+    response.assert_status_ok();
+    
+    // Verify in database
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE email = $1"
+    )
+    .bind("test@example.com")
+    .fetch_one(&pool)
+    .await?;
+    
+    assert_eq!(user.email, "test@example.com");
+    
+    Ok(())
+}
+```
+
+### Testing with Multiple Organizations/Users
+
+```rust
+#[sqlx::test(fixtures("organizations", "users"))]
+async fn test_organization_isolation(pool: PgPool) -> sqlx::Result<()> {
+    // Create two organizations
+    let org1 = create_organization(&pool, "Org 1").await?;
+    let org2 = create_organization(&pool, "Org 2").await?;
+    
+    // Create users in each
+    let user1 = create_user(&pool, org1, "user1@example.com").await?;
+    let user2 = create_user(&pool, org2, "user2@example.com").await?;
+    
+    // Verify isolation
+    let org1_users = get_users_in_org(&pool, org1).await?;
+    assert_eq!(org1_users.len(), 1);
+    assert_eq!(org1_users[0].id, user1);
+    
+    Ok(())
+}
+```
+
+## References
+
+- [sqlx::test Documentation](https://docs.rs/sqlx/latest/sqlx/attr.test.html)
+- [Rust Exercises: Database Isolation](https://rust-exercises.com/advanced-testing/06_database_isolation/00_intro.html)
+- [Rust Exercises: sqlx::test](https://rust-exercises.com/advanced-testing/06_database_isolation/01_sqlx_test.html)
+- [sqlx GitHub Repository](https://github.com/launchbadge/sqlx)

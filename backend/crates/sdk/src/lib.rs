@@ -1,14 +1,10 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod abi;
+pub mod node;
+pub mod plugin;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use abi::{
+    ExecutionContext, ExecutionRequestBuilder, ExecutionResponseBuilder, NodeError,
+    NodeExecutionRequest, NodeExecutionResponse, ABI_VERSION,
+};
+pub use node::{ConfigOption, InputPin, NodeDefinition, NodeGroup, OutputPin, PinType};
+pub use plugin::Plugin;

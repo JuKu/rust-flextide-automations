@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Request, State},
+    extract::{Extension, Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Response},
@@ -10,6 +10,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sqlx::Row;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -22,14 +23,8 @@ pub struct AppState {
     pub db_pool: flextide_core::database::DatabasePool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String, // email
-    pub user_uuid: String, // user UUID
-    pub exp: usize,
-    pub iat: usize,
-    pub is_server_admin: bool,
-}
+// Re-export Claims from flextide-core for convenience
+pub use flextide_core::jwt::Claims;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -164,6 +159,7 @@ pub async fn auth_middleware(
 
 /// Organization check middleware - validates user belongs to organization
 pub async fn organization_middleware(
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -176,12 +172,13 @@ pub async fn organization_middleware(
         return next.run(request).await;
     }
 
-    // Skip for login, register, health, logout, and organizations/list-own endpoints
+    // Skip for login, register, health, logout, organizations/list-own, and organizations/create endpoints
     if path == "/api/login"
         || path == "/api/register"
         || path == "/api/health"
         || path == "/api/logout"
         || path == "/api/organizations/list-own"
+        || path == "/api/organizations/create"
     {
         tracing::debug!("[Org] Skipping organization check for endpoint: {}", path);
         return next.run(request).await;
@@ -262,6 +259,9 @@ pub async fn organization_middleware(
 
     // Attach organization UUID to request extensions
     request.extensions_mut().insert(org_uuid_string);
+    
+    // Attach database pool to request extensions for use in handlers
+    request.extensions_mut().insert(state.db_pool.clone());
 
     next.run(request).await
 }
@@ -322,7 +322,14 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/register", post(register))
         .route("/api/logout", post(logout))
         .route("/api/organizations/list-own", get(list_own_organizations))
+        .route("/api/organizations/create", post(create_organization))
+        .route("/api/permissions", get(get_permissions))
         .route("/api/workflows/{workflow_uuid}/edit-title", post(edit_workflow_title))
+        .route("/api/executions/last-executions", get(get_last_executions))
+        .route("/api/integrations", get(get_integrations))
+        .route("/api/integrations/list", get(list_integrations))
+        .route("/api/integrations/search", get(search_integrations))
+        .nest("/api", flextide_modules_crm::create_router())
         .layer(
             ServiceBuilder::new()
                 .layer(cors)
@@ -330,7 +337,10 @@ pub fn create_app(state: AppState) -> Router {
                     state.clone(),
                     auth_middleware,
                 ))
-                .layer(axum::middleware::from_fn(organization_middleware))
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    organization_middleware,
+                ))
                 .layer(trace_layer)
         )
         .with_state(state)
@@ -518,43 +528,712 @@ where
 }
 
 pub async fn list_own_organizations(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
 ) -> Result<Json<Vec<Organization>>, (StatusCode, Json<Value>)> {
-    // Mock data - in production, fetch from database
-    let organizations = vec![
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "My Organization".to_string(),
-            is_admin: true,
-            license: License::ProPlus,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Another Org".to_string(),
-            is_admin: true,
-            license: License::Team,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org".to_string(),
-            is_admin: true,
-            license: License::Pro,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org 2".to_string(),
-            is_admin: false,
-            license: License::Free,
-        },
-        Organization {
-            uuid: uuid::Uuid::new_v4().to_string(),
-            title: "Test Org 3".to_string(),
-            is_admin: false,
-            license: License::Pro,
-        },
-    ];
+    use flextide_core::database::DatabasePool;
+    
+    let organizations = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = ?
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = $1
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT o.uuid, o.name, om.role
+                 FROM organizations o
+                 INNER JOIN organization_members om ON o.uuid = om.org_id
+                 WHERE om.user_id = ?1
+                 ORDER BY o.name"
+            )
+            .bind(&claims.user_uuid)
+            .fetch_all(p)
+            .await
+        }
+    }
+    .map_err(|e| {
+        tracing::error!("Failed to fetch organizations for user {}: {}", claims.user_uuid, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to fetch organizations" })),
+        )
+    })?;
 
-    Ok(Json(organizations))
+    let result: Vec<Organization> = organizations
+        .into_iter()
+        .map(|(uuid, name, role)| {
+            // User is admin if role is 'admin' or 'owner'
+            let is_admin = role == "admin" || role == "owner";
+            // TODO: Add license field to organizations table, defaulting to Free for now
+        Organization {
+                uuid,
+                title: name,
+                is_admin,
+            license: License::Free,
+            }
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+}
+
+/// Create a new organization and make the current user the owner
+///
+/// POST /api/organizations/create
+/// Creates a new organization with the given name and adds the current user as owner.
+/// Returns an error if the user already has 50 or more organizations.
+pub async fn create_organization(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(payload): Json<CreateOrganizationRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::database::DatabasePool;
+    use uuid::Uuid;
+
+    // Validate organization name
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Organization name cannot be empty" })),
+        ));
+    }
+
+    if name.len() > 255 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Organization name cannot exceed 255 characters" })),
+        ));
+    }
+
+    // Check if user already has 50 or more organizations
+    let count: i64 = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = $1")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM organization_members WHERE user_id = ?1")
+                .bind(&claims.user_uuid)
+                .fetch_one(p)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to count user organizations: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    )
+                })?;
+            row.get("count")
+        }
+    };
+
+    if count >= 50 {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "You cannot have more than 50 organizations" })),
+        ));
+    }
+
+    // Generate organization UUID
+    let org_uuid = Uuid::new_v4().to_string();
+
+    // Create organization in a transaction
+    match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?, ?, ?)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?, ?, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES (?, ?, 'super_admin')
+                 ON DUPLICATE KEY UPDATE permission_name = permission_name",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+        DatabasePool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES ($1, $2, $3)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES ($1, $2, 'super_admin')
+                 ON CONFLICT (user_id, organization_uuid, permission_name) DO NOTHING",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+        DatabasePool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| {
+                tracing::error!("Failed to start transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+
+            // Insert organization
+            sqlx::query("INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?1, ?2, ?3)")
+                .bind(&org_uuid)
+                .bind(&name)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create organization: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to create organization" })),
+                    )
+                })?;
+
+            // Add user as owner
+            sqlx::query("INSERT INTO organization_members (org_id, user_id, role) VALUES (?1, ?2, 'owner')")
+                .bind(&org_uuid)
+                .bind(&claims.user_uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to add user as owner: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to add user as owner" })),
+                    )
+                })?;
+
+            // Grant super_admin permission to the user for the organization
+            sqlx::query(
+                "INSERT OR IGNORE INTO user_permissions (user_id, organization_uuid, permission_name)
+                 VALUES (?1, ?2, 'super_admin')",
+            )
+            .bind(&claims.user_uuid)
+            .bind(&org_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to grant super_admin permission: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to grant super_admin permission" })),
+                )
+            })?;
+
+            tx.commit().await.map_err(|e| {
+                tracing::error!("Failed to commit transaction: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                )
+            })?;
+        }
+    }
+
+    tracing::info!(
+        "Organization '{}' created successfully with UUID {} for user {}. User granted super_admin permission.",
+        name,
+        org_uuid,
+        claims.user_uuid
+    );
+
+    Ok(Json(json!({
+        "uuid": org_uuid,
+        "name": name,
+        "is_admin": true,
+        "license": "Free"
+    })))
+}
+
+/// Get all permissions for the current user in the current organization
+///
+/// GET /api/permissions
+/// Returns a list of permission strings that the user has for the current organization
+pub async fn get_permissions(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::permissions::list_user_permissions;
+    
+    let user_permissions = list_user_permissions(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch user permissions: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to fetch permissions" })),
+            )
+        })?;
+    
+    // Extract just the permission names
+    let permissions: Vec<String> = user_permissions
+        .into_iter()
+        .map(|up| up.permission_name)
+        .collect();
+    
+    Ok(Json(json!({
+        "permissions": permissions,
+        "user_uuid": claims.user_uuid,
+        "organization_uuid": org_uuid
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LastExecutionsQuery {
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+fn default_page() -> u32 {
+    1
+}
+
+fn default_limit() -> u32 {
+    30
+}
+
+/// Helper function to extract execution data from a database row
+/// Works with all database types (MySQL, PostgreSQL, SQLite)
+fn extract_execution_from_row<R: Row>(row: R) -> ExecutionResponse
+where
+    usize: sqlx::ColumnIndex<R>,
+    for<'r> &'r str: sqlx::ColumnIndex<R>,
+    for<'r> String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Option<String>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Value: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    for<'r> Option<Value>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    let uuid: String = row.get(0usize);
+    let status: String = row.get(1usize);
+    let workflow_name: String = row.get(2usize);
+    let workflow_uuid: String = row.get(3usize);
+    let started_at: String = row.get(4usize);
+    // Handle NULL dates - DATE_FORMAT/TO_CHAR return NULL for NULL input
+    // Use try_get to safely handle NULL values
+    let finished_at: Option<String> = row.try_get::<Option<String>, _>(5usize)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let trigger_type: String = row.get(6usize);
+    
+    // Handle JSON metadata - try to get as Value first, then as String
+    let metadata_value: Option<Value> = row
+        .try_get::<Option<Value>, _>(7usize)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            row.try_get::<Option<String>, _>(7usize)
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        });
+
+    // Create short UUID (first 8 characters)
+    let short_uuid = uuid.chars().take(8).collect::<String>();
+
+    ExecutionResponse {
+        uuid,
+        short_uuid,
+        status,
+        workflow_name,
+        workflow_uuid,
+        started_at,
+        finished_at,
+        trigger_type,
+        credits_used: 0, // TODO: Add credits tracking
+        metadata: metadata_value,
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecutionResponse {
+    pub uuid: String,
+    pub short_uuid: String,
+    pub status: String,
+    pub workflow_name: String,
+    pub workflow_uuid: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub trigger_type: String,
+    pub credits_used: i64, // TODO: Add credits tracking later, defaulting to 0
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LastExecutionsResponse {
+    pub executions: Vec<ExecutionResponse>,
+    pub total: i64,
+    pub page: u32,
+    pub limit: u32,
+    pub total_pages: u32,
+}
+
+/// Get last executions for the organization
+///
+/// GET /api/executions/last-executions?page=1&limit=30
+pub async fn get_last_executions(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Query(query): Query<LastExecutionsQuery>,
+) -> Result<Json<LastExecutionsResponse>, (StatusCode, Json<Value>)> {
+    use flextide_core::database::DatabasePool;
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "can_see_last_executions",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to see last executions"
+            })),
+        ));
+    }
+
+    // Validate limit (max 50)
+    let limit = query.limit.min(50).max(1);
+    let page = query.page.max(1);
+    let offset = (page - 1) * limit;
+
+    // Get total count
+    let total = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = ?"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = $1"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM runs WHERE organization_uuid = ?1"
+            )
+            .bind(&org_uuid)
+            .fetch_one(p)
+            .await
+        }
+    }
+    .map_err(|e| {
+        tracing::error!("Failed to count executions: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to fetch executions" })),
+        )
+    })?;
+
+    // Fetch executions with workflow name
+    // Using a helper function to handle different database types
+    let execution_responses: Vec<ExecutionResponse> = match &state.db_pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    DATE_FORMAT(r.started_at, '%Y-%m-%d %H:%i:%s') as started_at,
+                    DATE_FORMAT(r.finished_at, '%Y-%m-%d %H:%i:%s') as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = ?
+                 ORDER BY r.created_at DESC
+                 LIMIT ? OFFSET ?"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    TO_CHAR(r.started_at, 'YYYY-MM-DD HH24:MI:SS') as started_at,
+                    TO_CHAR(r.finished_at, 'YYYY-MM-DD HH24:MI:SS') as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = $1
+                 ORDER BY r.created_at DESC
+                 LIMIT $2 OFFSET $3"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT 
+                    r.uuid,
+                    r.status,
+                    COALESCE(SUBSTRING(w.name, 1, 50), 'Unknown') as workflow_name,
+                    r.workflow_id,
+                    strftime('%Y-%m-%d %H:%M:%S', r.started_at) as started_at,
+                    strftime('%Y-%m-%d %H:%M:%S', r.finished_at) as finished_at,
+                    r.trigger_type,
+                    r.metadata
+                 FROM runs r
+                 LEFT JOIN workflows w ON r.workflow_id = w.uuid
+                 WHERE r.organization_uuid = ?1
+                 ORDER BY r.created_at DESC
+                 LIMIT ?2 OFFSET ?3"
+            )
+            .bind(&org_uuid)
+            .bind(limit as i64)
+            .bind(offset as i64)
+            .fetch_all(p)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch executions: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to fetch executions" })),
+                )
+            })?;
+
+            rows.into_iter()
+                .map(|row| extract_execution_from_row(row))
+                .collect()
+        }
+    };
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+    Ok(Json(LastExecutionsResponse {
+        executions: execution_responses,
+        total,
+        page,
+        limit,
+        total_pages,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -631,5 +1310,308 @@ pub async fn edit_workflow_title(
         "message": "Title updated successfully",
         "workflow_uuid": workflow_uuid,
         "title": payload.title
+    })))
+}
+
+/// Get activated integrations
+///
+/// GET /api/integrations
+/// Returns a list of activated integrations with their frontend routes
+pub async fn get_integrations(
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Default activated integrations
+    let integrations = json!([
+        {
+            "name": "JIRA",
+            "route": "/integrations/jira/overview"
+        },
+        {
+            "name": "GitHub Issues",
+            "route": "/integrations/github-issues/overview"
+        },
+        {
+            "name": "OpenAI",
+            "route": "/integrations/openai/overview"
+        }
+    ]);
+
+    Ok(Json(integrations))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListIntegrationsQuery {
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+/// List all available integrations with pagination
+///
+/// GET /api/integrations/list?page=1&limit=20
+/// Returns a paginated list of all integrations (activated and not activated)
+pub async fn list_integrations(
+    Query(query): Query<ListIntegrationsQuery>,
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let page = query.page.max(1);
+    let limit = query.limit.min(100).max(1);
+    let offset = (page - 1) * limit;
+
+    // Mock data - in production, this would come from database
+    // This includes all available integrations
+    let all_integrations = vec![
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440001",
+            "title": "JIRA",
+            "description": "Integrate with JIRA to create, update, and manage issues. Track project progress and automate workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-12-01T14:30:00Z",
+            "version": "1.0.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.5,
+            "configuration_url": "/integrations/jira/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440002",
+            "title": "GitHub Issues",
+            "description": "Connect to GitHub to manage issues, pull requests, and repositories. Automate your development workflow.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-02-01T09:00:00Z",
+            "updated_at": "2024-11-15T16:20:00Z",
+            "version": "1.2.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.8,
+            "configuration_url": "/integrations/github-issues/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440003",
+            "title": "OpenAI",
+            "description": "Integrate OpenAI's GPT models for AI-powered automation. Generate content, analyze data, and create intelligent workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-03-10T11:00:00Z",
+            "updated_at": "2024-12-10T10:15:00Z",
+            "version": "2.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 5.0,
+            "configuration_url": "/integrations/openai/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440008",
+            "title": "Google Sheets",
+            "description": "Read and write data to Google Sheets. Automate spreadsheet operations and data synchronization.",
+            "activated": false,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-08-15T09:00:00Z",
+            "updated_at": "2024-12-08T10:00:00Z",
+            "version": "1.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.4,
+            "configuration_url": "/integrations/google-sheets/overview",
+            "pricing_type": "free"
+        }),
+    ];
+
+    let total = all_integrations.len() as u32;
+    let start = offset as usize;
+    let end = (offset + limit) as usize;
+    let paginated_integrations: Vec<Value> = all_integrations
+        .into_iter()
+        .skip(start)
+        .take((end - start).min(limit as usize))
+        .collect();
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+    Ok(Json(json!({
+        "integrations": paginated_integrations,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchIntegrationsQuery {
+    pub q: String,
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+/// Search integrations
+///
+/// GET /api/integrations/search?q=query&page=1&limit=20
+/// Returns a paginated list of integrations matching the search query
+pub async fn search_integrations(
+    Query(query): Query<SearchIntegrationsQuery>,
+    State(_state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Extension(_org_uuid): Extension<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let search_query = query.q.trim().to_lowercase();
+    
+    if search_query.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Search query cannot be empty" })),
+        ));
+    }
+
+    let page = query.page.max(1);
+    let limit = query.limit.min(100).max(1);
+    let offset = (page - 1) * limit;
+
+    // Mock data - same as list_integrations
+    let all_integrations = vec![
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440001",
+            "title": "JIRA",
+            "description": "Integrate with JIRA to create, update, and manage issues. Track project progress and automate workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-12-01T14:30:00Z",
+            "version": "1.0.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.5,
+            "configuration_url": "/integrations/jira/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440002",
+            "title": "GitHub Issues",
+            "description": "Connect to GitHub to manage issues, pull requests, and repositories. Automate your development workflow.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-02-01T09:00:00Z",
+            "updated_at": "2024-11-15T16:20:00Z",
+            "version": "1.2.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.8,
+            "configuration_url": "/integrations/github-issues/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440003",
+            "title": "OpenAI",
+            "description": "Integrate OpenAI's GPT models for AI-powered automation. Generate content, analyze data, and create intelligent workflows.",
+            "activated": true,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-03-10T11:00:00Z",
+            "updated_at": "2024-12-10T10:15:00Z",
+            "version": "2.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 5.0,
+            "configuration_url": "/integrations/openai/overview",
+            "pricing_type": "free"
+        }),
+        json!({
+            "uuid": "550e8400-e29b-41d4-a716-446655440008",
+            "title": "Google Sheets",
+            "description": "Read and write data to Google Sheets. Automate spreadsheet operations and data synchronization.",
+            "activated": false,
+            "purchased": true,
+            "author_name": "Flextide Team",
+            "author_url": "https://flextide.com",
+            "created_at": "2024-08-15T09:00:00Z",
+            "updated_at": "2024-12-08T10:00:00Z",
+            "version": "1.1.0",
+            "verified": true,
+            "third_party": false,
+            "image_url": null,
+            "image_description": null,
+            "rating": 4.4,
+            "configuration_url": "/integrations/google-sheets/overview",
+            "pricing_type": "free"
+        }),
+    ];
+
+    // Filter integrations by search query (search in title and description)
+    let filtered: Vec<Value> = all_integrations
+        .into_iter()
+        .filter(|integration| {
+            let title = integration.get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let description = integration.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            title.contains(&search_query) || description.contains(&search_query)
+        })
+        .collect();
+
+    let total = filtered.len() as u32;
+    let start = offset as usize;
+    let end = (offset + limit) as usize;
+    let paginated_integrations: Vec<Value> = filtered
+        .into_iter()
+        .skip(start)
+        .take((end - start).min(limit as usize))
+        .collect();
+
+    let total_pages = if total > 0 {
+        ((total as f64) / (limit as f64)).ceil() as u32
+    } else {
+        0
+    };
+
+    Ok(Json(json!({
+        "integrations": paginated_integrations,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
     })))
 }

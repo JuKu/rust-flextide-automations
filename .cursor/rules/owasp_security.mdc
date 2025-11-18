@@ -1,0 +1,1038 @@
+---
+alwaysApply: false
+description: OWASP Top 10 security best practices and mitigations for Rust backend (Axum) and Next.js frontend applications. Ensures comprehensive security coverage across all layers.
+---
+
+# OWASP Top 10 Security Best Practices
+
+## Overview
+
+This document outlines security best practices based on the [OWASP Top 10:2021](https://owasp.org/Top10/) (current release) and [OWASP Top 10:2025 RC1](https://owasp.org/Top10/2025/0x00_2025-Introduction/) for Rust backend and Next.js frontend applications.
+
+**References:**
+- [OWASP Top 10:2021](https://owasp.org/Top10/)
+- [OWASP Top 10:2025 RC1](https://owasp.org/Top10/2025/0x00_2025-Introduction/)
+- [Cloudflare OWASP Guide](https://www.cloudflare.com/de-de/learning/security/threats/owasp-top-10/)
+
+---
+
+## A01:2021 – Broken Access Control
+
+### Description
+Broken access control occurs when restrictions on authenticated users are improperly enforced, allowing unauthorized access to sensitive data or functions.
+
+### Rust (Backend) Mitigations
+
+#### 1. Role-Based Access Control (RBAC)
+```rust
+// Always check permissions before allowing access
+use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+pub async fn protected_endpoint(
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Extension(pool): Extension<DatabasePool>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    // 1. Verify user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Database error" })))
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // 2. Check specific permission
+    let has_permission = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "module_crm_can_see_customer")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Database error" })))
+        })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have required permission" })),
+        ));
+    }
+
+    // 3. Verify resource ownership (if applicable)
+    // Always verify the resource belongs to the user's organization
+    // ...
+}
+```
+
+#### 2. Resource Ownership Verification
+```rust
+// ALWAYS verify resource belongs to user's organization
+pub async fn get_customer(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Path(customer_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid).await?;
+    
+    // CRITICAL: Verify resource ownership
+    if customer.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Resource does not belong to this organization" })),
+        ));
+    }
+    
+    Ok(Json(json!(customer)))
+}
+```
+
+#### 3. Principle of Least Privilege
+- Grant minimum permissions required for each operation
+- Use permission strings like `module_crm_can_see_customer`, `module_crm_can_edit_customers`
+- Never use wildcard permissions or "admin" checks without specific context
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Client-Side Permission Checks
+```typescript
+// Check permissions before rendering sensitive UI
+import { getPermissions } from '@/lib/api';
+
+export async function CustomerDetailPage() {
+  const permissions = await getPermissions();
+  
+  if (!permissions.includes('module_crm_can_see_customer')) {
+    return <AccessDenied />;
+  }
+  
+  // Render protected content
+}
+```
+
+#### 2. Route Protection
+```typescript
+// Use middleware or layout guards
+// frontend/src/middleware.ts
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get('token');
+  if (!token && request.nextUrl.pathname.startsWith('/modules')) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+}
+```
+
+#### 3. API Error Handling
+```typescript
+// Always handle 403 Forbidden errors
+try {
+  const data = await getCrmCustomer(uuid);
+} catch (error) {
+  if (error instanceof Error && error.message.includes('403')) {
+    // Redirect to access denied page
+    router.push('/access-denied');
+  }
+}
+```
+
+### Best Practices
+- **Never trust client-side checks alone** - Always verify on backend
+- **Use consistent permission naming** - `module_<module>_can_<action>_<resource>`
+- **Log access control failures** - Monitor for potential attacks
+- **Test with different user roles** - Ensure permissions work correctly
+
+---
+
+## A02:2021 – Cryptographic Failures
+
+### Description
+Previously "Sensitive Data Exposure" - inadequate protection of sensitive data through weak or missing encryption.
+
+### Rust (Backend) Mitigations
+
+#### 1. Password Hashing
+```rust
+// Use Argon2 for password hashing (see password_authentication.mdc)
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
+
+// NEVER store passwords in plain text
+// ALWAYS use Argon2 with unique salts
+```
+
+#### 2. Data Encryption at Rest
+```rust
+// For sensitive data in database, consider encryption
+// Use database-level encryption or application-level encryption
+// Example: Encrypt sensitive customer data fields
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+    Aes256Gcm, Nonce,
+};
+
+fn encrypt_sensitive_data(data: &str, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+    let cipher = Aes256Gcm::new_from_slice(key)?;
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher.encrypt(&nonce, data.as_bytes())?;
+    Ok(ciphertext)
+}
+```
+
+#### 3. Secure Key Management
+```rust
+// Store secrets in environment variables, never in code
+let jwt_secret = std::env::var("JWT_SECRET")
+    .expect("JWT_SECRET must be set");
+
+// Use strong secrets (minimum 256 bits for HS256)
+// Consider using AWS Secrets Manager, HashiCorp Vault, etc. in production
+```
+
+#### 4. TLS/HTTPS
+```rust
+// Always use HTTPS in production
+// Configure Axum with TLS:
+use axum_server::tls_rustls::RustlsConfig;
+
+let config = RustlsConfig::from_pem_file("cert.pem", "key.pem").await?;
+axum_server::bind_rustls("0.0.0.0:443", config)
+    .serve(app.into_make_service())
+    .await?;
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Secure Token Storage
+```typescript
+// Prefer HttpOnly cookies over localStorage for tokens
+// If using localStorage, ensure HTTPS only
+export function setToken(token: string) {
+  // Option 1: HttpOnly cookie (set by backend)
+  // Option 2: Secure localStorage (HTTPS only)
+  if (window.location.protocol === 'https:') {
+    localStorage.setItem('token', token);
+  }
+}
+```
+
+#### 2. Environment Variables
+```typescript
+// Never expose secrets in client-side code
+// Only NEXT_PUBLIC_* variables are exposed to browser
+// Use server-side API routes for sensitive operations
+```
+
+#### 3. Content Security Policy
+```typescript
+// next.config.js
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+          },
+        ],
+      },
+    ];
+  },
+};
+```
+
+### Best Practices
+- **Never log sensitive data** - Passwords, tokens, credit cards, etc.
+- **Use HTTPS everywhere** - Enforce in production
+- **Encrypt sensitive fields** - PII, financial data, health records
+- **Rotate secrets regularly** - JWT secrets, encryption keys
+- **Use strong algorithms** - Argon2, AES-256-GCM, RSA-2048+
+
+---
+
+## A03:2021 – Injection
+
+### Description
+Injection occurs when untrusted data is sent to an interpreter as part of a command or query, leading to unintended execution.
+
+### Rust (Backend) Mitigations
+
+#### 1. SQL Injection Prevention
+```rust
+// ALWAYS use parameterized queries with sqlx
+// NEVER use string concatenation for SQL queries
+
+// ✅ CORRECT: Parameterized query
+let customer = sqlx::query_as!(
+    CrmCustomer,
+    "SELECT * FROM module_crm_customers WHERE uuid = $1 AND organization_uuid = $2",
+    customer_uuid,
+    org_uuid
+)
+.fetch_optional(&pool)
+.await?;
+
+// ❌ WRONG: String concatenation (VULNERABLE)
+// let query = format!("SELECT * FROM customers WHERE uuid = '{}'", uuid);
+```
+
+#### 2. Input Validation
+```rust
+use validator::{Validate, ValidationError};
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateCustomerRequest {
+    #[validate(length(min = 1, max = 255))]
+    pub first_name: String,
+    
+    #[validate(length(min = 1, max = 255))]
+    pub last_name: String,
+    
+    #[validate(email)]
+    pub email: Option<String>,
+    
+    #[validate(regex = "PHONE_REGEX")]
+    pub phone_number: Option<String>,
+}
+
+pub async fn create_customer(
+    Json(request): Json<CreateCustomerRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    // Validate input
+    request.validate()
+        .map_err(|e| {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Validation failed: {}", e) })))
+        })?;
+    
+    // Sanitize input (remove dangerous characters)
+    let first_name = sanitize_input(&request.first_name);
+    
+    // Use parameterized query
+    // ...
+}
+```
+
+#### 3. Command Injection Prevention
+```rust
+// If you must execute system commands, use structured APIs
+use std::process::Command;
+
+// ❌ WRONG: Shell command injection vulnerable
+// Command::new("sh").arg("-c").arg(format!("echo {}", user_input));
+
+// ✅ CORRECT: Direct command execution
+let output = Command::new("echo")
+    .arg(user_input) // Arguments are automatically escaped
+    .output()?;
+```
+
+#### 4. NoSQL Injection Prevention
+```rust
+// If using MongoDB or similar, use typed queries
+// Avoid dynamic query construction from user input
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Input Sanitization
+```typescript
+import DOMPurify from 'isomorphic-dompurify';
+
+// Sanitize user input before rendering
+export function UserComment({ comment }: { comment: string }) {
+  const sanitized = DOMPurify.sanitize(comment);
+  return <div dangerouslySetInnerHTML={{ __html: sanitized }} />;
+}
+```
+
+#### 2. XSS Prevention
+```typescript
+// Always escape user input
+export function DisplayName({ name }: { name: string }) {
+  // React automatically escapes content
+  return <div>{name}</div>; // ✅ Safe
+  
+  // Only use dangerouslySetInnerHTML with sanitized content
+  // return <div dangerouslySetInnerHTML={{ __html: sanitize(name) }} />;
+}
+```
+
+#### 3. Content Security Policy
+```typescript
+// Set strict CSP headers (see Cryptographic Failures section)
+// Prevents XSS attacks by restricting script execution
+```
+
+### Best Practices
+- **Always use parameterized queries** - Never string concatenation
+- **Validate all inputs** - Type, length, format, range
+- **Sanitize before storage** - Remove dangerous characters
+- **Use ORM/query builders** - They handle escaping automatically
+- **Escape output** - When rendering user content
+
+---
+
+## A04:2021 – Insecure Design
+
+### Description
+Insecure design refers to flaws in the design phase that result in insecure application architecture.
+
+### Rust (Backend) Mitigations
+
+#### 1. Threat Modeling
+- Identify threats during design phase
+- Document security requirements
+- Design security controls from the start
+
+#### 2. Secure Architecture Patterns
+```rust
+// Use middleware for cross-cutting concerns
+use tower::ServiceBuilder;
+use tower_http::{
+    cors::CorsLayer,
+    trace::TraceLayer,
+    compression::CompressionLayer,
+};
+
+let middleware_stack = ServiceBuilder::new()
+    .layer(TraceLayer::new_for_http())
+    .layer(CorsLayer::permissive()) // Configure properly in production
+    .layer(CompressionLayer::new())
+    .layer(rate_limit_layer)
+    .into_inner();
+```
+
+#### 3. Separation of Concerns
+```rust
+// Separate authentication, authorization, and business logic
+// Keep security logic in dedicated modules
+// Example: flextide_core::user for user management
+// Example: flextide_core::jwt for token handling
+```
+
+#### 4. Fail-Safe Defaults
+```rust
+// Default to most restrictive permissions
+// Require explicit permission grants
+// Deny by default, allow by exception
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Secure Component Design
+```typescript
+// Design components with security in mind
+// Separate public and private components
+// Use layout guards for protected routes
+```
+
+#### 2. Error Handling Design
+```typescript
+// Don't expose sensitive information in errors
+// Use generic error messages for users
+// Log detailed errors server-side only
+```
+
+### Best Practices
+- **Security by design** - Not an afterthought
+- **Threat modeling** - Identify risks early
+- **Secure defaults** - Most restrictive by default
+- **Defense in depth** - Multiple security layers
+- **Regular security reviews** - Code reviews, architecture reviews
+
+---
+
+## A05:2021 – Security Misconfiguration
+
+### Description
+Security misconfiguration involves improper implementation of security controls, such as default settings, incomplete configurations, or overly verbose error messages.
+
+### Rust (Backend) Mitigations
+
+#### 1. Environment-Based Configuration
+```rust
+// Use different configs for dev/staging/production
+use config::Config;
+
+let config = Config::builder()
+    .add_source(config::Environment::with_prefix("APP"))
+    .build()?;
+
+// Never use default credentials
+// Disable debug mode in production
+// Use secure defaults
+```
+
+#### 2. Error Messages
+```rust
+// Don't expose stack traces in production
+use tracing::error;
+
+pub async fn endpoint() -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    match operation().await {
+        Ok(result) => Ok(Json(json!(result))),
+        Err(e) => {
+            // Log detailed error server-side
+            error!("Operation failed: {:?}", e);
+            
+            // Return generic error to client
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "An error occurred. Please try again later." })),
+            ))
+        }
+    }
+}
+```
+
+#### 3. Security Headers
+```rust
+use tower_http::set_header::SetResponseHeaderLayer;
+use axum::http::HeaderValue;
+
+// Add security headers
+.layer(SetResponseHeaderLayer::overriding(
+    axum::http::header::STRICT_TRANSPORT_SECURITY,
+    HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+))
+.layer(SetResponseHeaderLayer::overriding(
+    axum::http::header::X_CONTENT_TYPE_OPTIONS,
+    HeaderValue::from_static("nosniff"),
+))
+.layer(SetResponseHeaderLayer::overriding(
+    axum::http::header::X_FRAME_OPTIONS,
+    HeaderValue::from_static("DENY"),
+))
+```
+
+#### 4. CORS Configuration
+```rust
+use tower_http::cors::CorsLayer;
+
+// Configure CORS properly
+let cors = CorsLayer::new()
+    .allow_origin("https://yourdomain.com".parse::<HeaderValue>()?)
+    .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+    .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+    .allow_credentials(true);
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Environment Variables
+```typescript
+// next.config.js
+module.exports = {
+  env: {
+    // Only expose what's necessary
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+    // Never expose secrets
+  },
+};
+```
+
+#### 2. Production Build
+```typescript
+// Disable source maps in production
+// next.config.js
+module.exports = {
+  productionBrowserSourceMaps: false,
+  // Remove debug information
+};
+```
+
+#### 3. Security Headers
+```typescript
+// next.config.js
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains',
+          },
+        ],
+      },
+    ];
+  },
+};
+```
+
+### Best Practices
+- **Review configurations regularly** - Security audits
+- **Use secure defaults** - Most restrictive settings
+- **Separate environments** - Dev, staging, production
+- **Disable unnecessary features** - Reduce attack surface
+- **Keep software updated** - Patches and updates
+
+---
+
+## A06:2021 – Vulnerable and Outdated Components
+
+### Description
+Using components with known vulnerabilities can compromise application security.
+
+### Rust (Backend) Mitigations
+
+#### 1. Dependency Management
+```toml
+# Cargo.toml - Pin versions, avoid wildcards
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "mysql", "postgres", "sqlite"] }
+axum = "0.7"
+
+# Use cargo-audit to check for vulnerabilities
+# cargo install cargo-audit
+# cargo audit
+```
+
+#### 2. Regular Updates
+```bash
+# Check for outdated dependencies
+cargo outdated
+
+# Update dependencies regularly
+cargo update
+
+# Review changelogs for security fixes
+```
+
+#### 3. Vulnerability Scanning
+```bash
+# Use cargo-audit for vulnerability scanning
+cargo install cargo-audit
+cargo audit
+
+# Integrate into CI/CD pipeline
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Package Management
+```json
+// package.json - Pin versions
+{
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "18.3.0",
+    "react-dom": "18.3.0"
+  }
+}
+```
+
+#### 2. Regular Updates
+```bash
+# Check for outdated packages
+pnpm outdated
+
+# Update packages
+pnpm update
+
+# Use pnpm audit for vulnerability scanning
+pnpm audit
+```
+
+#### 3. Dependency Scanning
+```bash
+# Use npm audit or pnpm audit
+pnpm audit
+
+# Fix vulnerabilities
+pnpm audit fix
+
+# Integrate into CI/CD
+```
+
+### Best Practices
+- **Regular dependency updates** - Weekly/monthly reviews
+- **Automated scanning** - CI/CD integration
+- **Remove unused dependencies** - Reduce attack surface
+- **Monitor security advisories** - CVE databases
+- **Test after updates** - Ensure compatibility
+
+---
+
+## A07:2021 – Identification and Authentication Failures
+
+### Description
+Weak authentication mechanisms can allow attackers to compromise user credentials.
+
+### Rust (Backend) Mitigations
+
+#### 1. Strong Password Requirements
+```rust
+// See password_authentication.mdc for details
+// Minimum 12 characters, enforce complexity
+// Use Argon2 for hashing
+```
+
+#### 2. Multi-Factor Authentication
+```rust
+// Support TOTP (Time-based One-Time Password)
+use totp_rs::{Algorithm, Secret, TOTP};
+
+// Generate TOTP secret for user
+let secret = Secret::generate_secret();
+let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, secret)?;
+
+// Verify TOTP code
+let is_valid = totp.check_current(&user_code)?;
+```
+
+#### 3. Session Management
+```rust
+// Use secure JWT tokens
+// Short expiration (24 hours)
+// Support token revocation
+// Implement refresh tokens
+```
+
+#### 4. Rate Limiting
+```rust
+// Prevent brute force attacks
+use tower::limit::RateLimitLayer;
+use tower::ServiceBuilder;
+
+// Limit login attempts
+.layer(RateLimitLayer::new(5, Duration::from_secs(900))) // 5 per 15 minutes
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Secure Token Storage
+```typescript
+// Prefer HttpOnly cookies
+// If using localStorage, ensure HTTPS only
+// Never expose tokens in URLs
+```
+
+#### 2. Session Timeout
+```typescript
+// Implement automatic logout after inactivity
+useEffect(() => {
+  const timeout = setTimeout(() => {
+    logout();
+  }, 30 * 60 * 1000); // 30 minutes
+  
+  return () => clearTimeout(timeout);
+}, []);
+```
+
+#### 3. Password Strength Indicator
+```typescript
+// Show password strength to users
+// Enforce strong passwords client-side (but verify server-side)
+```
+
+### Best Practices
+- **Strong passwords** - Minimum 12 characters
+- **MFA support** - TOTP, SMS, Email codes
+- **Rate limiting** - Prevent brute force
+- **Secure sessions** - HttpOnly cookies, short expiration
+- **Account lockout** - After failed attempts
+
+---
+
+## A08:2021 – Software and Data Integrity Failures
+
+### Description
+Issues related to code and data integrity, such as relying on untrusted sources for updates.
+
+### Rust (Backend) Mitigations
+
+#### 1. Dependency Verification
+```toml
+# Use cargo-vet for dependency verification
+# Verify dependencies from trusted sources
+# Check package signatures
+```
+
+#### 2. CI/CD Security
+```yaml
+# .github/workflows/ci.yml
+# Verify build artifacts
+# Sign releases
+# Use trusted build environments
+```
+
+#### 3. Code Integrity
+```rust
+// Use signed commits
+// Verify code before deployment
+// Use checksums for artifacts
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Subresource Integrity (SRI)
+```typescript
+// Verify external scripts
+<script
+  src="https://cdn.example.com/library.js"
+  integrity="sha384-..."
+  crossorigin="anonymous"
+></script>
+```
+
+#### 2. Package Verification
+```bash
+# Verify package integrity
+pnpm install --frozen-lockfile
+# Use lock files to ensure consistent dependencies
+```
+
+### Best Practices
+- **Verify dependencies** - Checksums, signatures
+- **Secure CI/CD** - Trusted environments
+- **Code signing** - Verify authenticity
+- **Lock files** - Reproducible builds
+- **Audit supply chain** - Monitor dependencies
+
+---
+
+## A09:2021 – Security Logging and Monitoring Failures
+
+### Description
+Insufficient logging and monitoring can delay the detection of security breaches.
+
+### Rust (Backend) Mitigations
+
+#### 1. Comprehensive Logging
+```rust
+use tracing::{info, warn, error};
+
+// Log security events
+pub async fn login_attempt(email: &str, success: bool) {
+    if success {
+        info!("Successful login: {}", email);
+    } else {
+        warn!("Failed login attempt: {}", email);
+        // Alert on multiple failures
+    }
+}
+
+// Log access control failures
+pub async fn access_denied(user_id: &str, resource: &str) {
+    error!("Access denied: user={}, resource={}", user_id, resource);
+    // Send alert
+}
+```
+
+#### 2. Structured Logging
+```rust
+use tracing::{event, Level};
+
+event!(
+    Level::WARN,
+    user_id = %user_id,
+    action = "failed_login",
+    ip = %ip_address,
+    "Security event: Failed login attempt"
+);
+```
+
+#### 3. Log Aggregation
+```rust
+// Use tracing-subscriber for structured logs
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+tracing_subscriber::registry()
+    .with(tracing_subscriber::fmt::layer())
+    .with(tracing_subscriber::EnvFilter::from_default_env())
+    .init();
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Client-Side Logging
+```typescript
+// Log security events client-side
+export function logSecurityEvent(event: string, details: object) {
+  // Send to logging service
+  fetch('/api/logs', {
+    method: 'POST',
+    body: JSON.stringify({ event, details, timestamp: Date.now() }),
+  });
+}
+```
+
+#### 2. Error Monitoring
+```typescript
+// Use error monitoring service (Sentry, etc.)
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.captureException(error, {
+  tags: { section: 'authentication' },
+});
+```
+
+### Best Practices
+- **Log security events** - Logins, access denials, permission changes
+- **Monitor logs** - Real-time alerts for suspicious activity
+- **Retain logs** - Minimum 90 days, longer for compliance
+- **Don't log sensitive data** - No passwords, tokens, PII
+- **Centralized logging** - Aggregate from all services
+
+---
+
+## A10:2021 – Server-Side Request Forgery (SSRF)
+
+### Description
+SSRF occurs when an application fetches a remote resource without validating the user-supplied URL, leading to unauthorized internal requests.
+
+### Rust (Backend) Mitigations
+
+#### 1. URL Validation
+```rust
+use url::Url;
+
+pub async fn fetch_url(user_url: &str) -> Result<String, Error> {
+    // Parse and validate URL
+    let url = Url::parse(user_url)?;
+    
+    // Whitelist allowed domains
+    let allowed_domains = ["api.example.com", "cdn.example.com"];
+    let host = url.host_str().ok_or("Invalid host")?;
+    
+    if !allowed_domains.contains(&host) {
+        return Err("Domain not allowed".into());
+    }
+    
+    // Block private IP ranges
+    if is_private_ip(&host) {
+        return Err("Private IP addresses not allowed".into());
+    }
+    
+    // Fetch with timeout
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    
+    let response = client.get(url).send().await?;
+    Ok(response.text().await?)
+}
+
+fn is_private_ip(host: &str) -> bool {
+    // Check for localhost, private IPs, etc.
+    host == "localhost" || 
+    host.starts_with("127.") ||
+    host.starts_with("192.168.") ||
+    host.starts_with("10.") ||
+    host.starts_with("172.16.")
+}
+```
+
+#### 2. Network Segmentation
+```rust
+// Use separate network for external requests
+// Isolate internal services
+// Use firewalls to restrict access
+```
+
+### Next.js (Frontend) Mitigations
+
+#### 1. Server-Side Proxying
+```typescript
+// Don't fetch external URLs directly from client
+// Use API route as proxy
+// pages/api/proxy.ts
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { url } = req.query;
+  
+  // Validate URL server-side
+  if (!isAllowedUrl(url as string)) {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+  
+  // Fetch and return
+  const response = await fetch(url as string);
+  const data = await response.text();
+  res.json({ data });
+}
+```
+
+### Best Practices
+- **Validate all URLs** - Whitelist allowed domains
+- **Block private IPs** - Prevent internal network access
+- **Use timeouts** - Prevent resource exhaustion
+- **Network segmentation** - Isolate services
+- **Monitor requests** - Detect suspicious patterns
+
+---
+
+## General Security Best Practices
+
+### Rust Backend
+
+1. **Use `#![forbid(unsafe_code)]`** - Prevent unsafe code unless absolutely necessary
+2. **Enable compiler warnings** - `#![warn(missing_docs)]`
+3. **Use type safety** - Leverage Rust's type system
+4. **Memory safety** - Rust's ownership system prevents many vulnerabilities
+5. **Regular security audits** - `cargo audit`, code reviews
+
+### Next.js Frontend
+
+1. **Content Security Policy** - Restrict script execution
+2. **XSS prevention** - Always escape user input
+3. **CSRF protection** - Use SameSite cookies, CSRF tokens
+4. **Secure headers** - HSTS, X-Frame-Options, etc.
+5. **Input validation** - Client and server-side
+
+### Both
+
+1. **HTTPS everywhere** - Never transmit sensitive data over HTTP
+2. **Regular updates** - Keep dependencies and runtime updated
+3. **Security testing** - Penetration testing, vulnerability scanning
+4. **Incident response** - Plan for security incidents
+5. **Security training** - Educate developers on security
+
+---
+
+## References
+
+- [OWASP Top 10:2021](https://owasp.org/Top10/)
+- [OWASP Top 10:2025 RC1](https://owasp.org/Top10/2025/0x00_2025-Introduction/)
+- [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/)
+- [Rust Security Best Practices](https://rustsec.org/)
+- [Next.js Security](https://nextjs.org/docs/app/building-your-application/configuring/security-headers)
+- [Cloudflare OWASP Guide](https://www.cloudflare.com/de-de/learning/security/threats/owasp-top-10/)
+
+---
+
+## Implementation Checklist
+
+When implementing new features, ensure:
+
+- [ ] Access control checks are in place
+- [ ] Sensitive data is encrypted
+- [ ] Input validation is implemented
+- [ ] Parameterized queries are used
+- [ ] Error messages don't leak information
+- [ ] Security headers are configured
+- [ ] Dependencies are up to date
+- [ ] Authentication is secure
+- [ ] Logging is comprehensive
+- [ ] URLs are validated (if applicable)

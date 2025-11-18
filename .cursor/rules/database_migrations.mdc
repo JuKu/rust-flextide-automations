@@ -54,9 +54,10 @@ This creates a new migration file in `backend/migrations/` with a timestamp pref
 
 Each migration file should:
 1. Include comments describing the purpose
-2. Use database-agnostic SQL when possible
-3. Include both MySQL and PostgreSQL variants if syntax differs
+2. **Use database-agnostic SQL that works on both MySQL and PostgreSQL**
+3. **Never include commented-out database-specific code** - write SQL that works for both databases
 4. Be idempotent (use `IF NOT EXISTS` where appropriate)
+5. Handle `updated_at` timestamps in application code rather than using database-specific features like `ON UPDATE CURRENT_TIMESTAMP` (MySQL) or triggers (PostgreSQL)
 
 Example:
 ```sql
@@ -152,6 +153,22 @@ sqlx::migrate!("./migrations").run(&pool).await?;
 
 **Note**: When running from the `backend/` directory, use `"./migrations"` as the path. If running from project root, use `"./backend/migrations"`.
 
+## Module Table Naming Convention
+
+All database tables that belong to a module must use the prefix `module_<module_name>_`.
+
+**Examples:**
+- CRM module tables: `module_crm_customers`, `module_crm_customer_notes`
+- Other module tables: `module_<module_name>_<table_name>`
+
+This convention ensures:
+- Clear module ownership and organization
+- Avoids naming conflicts between modules
+- Makes it easy to identify module-specific tables
+- Supports multi-module architecture
+
+**Note**: Core platform tables (like `users`, `organizations`, `organization_members`) do not use this prefix as they are part of the core system, not a module.
+
 ## Best Practices
 
 1. **Always test migrations** on both MySQL and PostgreSQL if supporting both
@@ -162,6 +179,7 @@ sqlx::migrate!("./migrations").run(&pool).await?;
 6. **Use descriptive names** that explain what the migration does
 7. **Test migrations** in development before applying to production
 8. **Back up databases** before running migrations in production
+9. **Use module table prefixes** for all module-specific tables (`module_<module_name>_<table_name>`)
 
 ## Database-Specific Considerations
 

@@ -4,10 +4,11 @@ import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { logout, listOwnOrganizations, type Organization } from "@/lib/api";
+import { logout, listOwnOrganizations, type Organization, getIntegrations, type Integration } from "@/lib/api";
 import { removeToken, getTokenPayload, isServerAdmin, isAuthenticated } from "@/lib/auth";
 import { getCurrentOrganizationUuid, setCurrentOrganizationUuid } from "@/lib/organization";
 import { useTheme } from "@/components/common/ThemeProvider";
+import { CreateOrganizationDialog } from "@/components/organization/CreateOrganizationDialog";
 
 function getLicenseColorClass(license: string): string {
   switch (license) {
@@ -30,13 +31,28 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-const menuItems: MenuItem[] = [
+const baseMenuItems: MenuItem[] = [
   { label: "Home", href: "/" },
   { label: "AI Coworkers", href: "/ai-coworkers" },
   { label: "Workflows", href: "/workflows" },
   { label: "Executions", href: "/executions" },
-  { label: "Services", href: "/services" },
-  { label: "Modules", href: "/modules" },
+  {
+    label: "Services",
+    href: "/services",
+    children: [
+      { label: "E-Mail Receiver", href: "/services/email-receiver" },
+      { label: "E-Mail Sender", href: "/services/email-sender" },
+    ],
+  },
+  {
+    label: "Modules",
+    href: "/modules",
+    children: [
+      { label: "CRM", href: "/modules/crm" },
+      { label: "Project Management", href: "/modules/project-management" },
+      { label: "Docs", href: "/modules/docs" },
+    ],
+  },
   { label: "Marketplace", href: "/marketplace" },
   {
     label: "Organization",
@@ -72,6 +88,8 @@ export function Header() {
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [userInitial, setUserInitial] = useState<string>("U");
   const initializedRef = useRef(false);
+  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
 
   // Get user initial on client side only
   useEffect(() => {
@@ -123,7 +141,81 @@ export function Header() {
     fetchOrganizations();
   }, [router]);
 
+  // Fetch permissions when organization changes
+  useEffect(() => {
+    if (!currentOrgUuid || !isAuthenticated()) {
+      return;
+    }
+
+    async function loadPermissions() {
+      try {
+        // Small delay to ensure organization UUID is properly set in sessionStorage
+        // This prevents race conditions during page reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const { fetchPermissions } = await import('@/lib/permissions');
+        await fetchPermissions(currentOrgUuid!); // Safe to use ! here because we checked above
+      } catch (error) {
+        // Silently handle errors - permissions will be fetched on next API call
+        // Don't log to console to avoid noise during organization switching
+        if (error instanceof Error && !error.message.includes('Network error')) {
+          console.error('Failed to fetch permissions:', error);
+        }
+      }
+    }
+
+    loadPermissions();
+  }, [currentOrgUuid]);
+
+  // Fetch integrations on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      return;
+    }
+
+    async function fetchIntegrations() {
+      try {
+        const integrationsList = await getIntegrations();
+        setIntegrations(integrationsList);
+      } catch (error) {
+        console.error("Failed to fetch integrations:", error);
+      }
+    }
+
+    fetchIntegrations();
+  }, []);
+
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
+
+  // Build menu items with dynamic integrations
+  const menuItems: MenuItem[] = (() => {
+    const items = [...baseMenuItems];
+    
+    // Find Services index and insert Integrations after it
+    const servicesIndex = items.findIndex(item => item.label === "Services");
+    if (servicesIndex !== -1) {
+      // Build integrations menu children
+      const integrationChildren: MenuItem[] = integrations.map(integration => ({
+        label: integration.name,
+        href: integration.route,
+      }));
+      
+      // Add "Add new integration" as last entry
+      integrationChildren.push({
+        label: "Add new integration",
+        href: "/integrations/new",
+      });
+
+      // Insert Integrations menu after Services
+      items.splice(servicesIndex + 1, 0, {
+        label: "Integrations",
+        href: "/integrations",
+        children: integrationChildren,
+      });
+    }
+    
+    return items;
+  })();
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -151,6 +243,9 @@ export function Header() {
     if (payload?.user_uuid) {
       await logout(payload.user_uuid);
     }
+    // Clear permissions cache on logout
+    const { clearPermissionsCache } = await import('@/lib/permissions');
+    clearPermissionsCache();
     removeToken();
     router.push("/login");
   };
@@ -230,19 +325,37 @@ export function Header() {
                 {/* Submenu */}
                 {item.children && activeSubmenu === item.href && (
                   <div className="absolute left-0 mt-1 w-48 rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border shadow-lg py-1">
-                    {item.children.map((child) => (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        className={`block px-4 py-2 text-sm transition-colors ${
-                          isActive(child.href)
-                            ? "bg-flextide-primary text-white"
-                            : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
-                        }`}
-                      >
-                        {child.label}
-                      </Link>
-                    ))}
+                    {item.children.map((child, index) => {
+                      const isAddNew = child.label === "Add new integration";
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={`block px-4 py-2 text-sm transition-colors flex items-center gap-2 ${
+                            isActive(child.href)
+                              ? "bg-flextide-primary text-white"
+                              : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
+                          } ${isAddNew && index === item.children!.length - 1 ? "border-t border-flextide-neutral-border mt-1 pt-2" : ""}`}
+                        >
+                          {isAddNew && (
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 4v16m8-8H4"
+                              />
+                            </svg>
+                          )}
+                          {child.label}
+                        </Link>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -268,20 +381,38 @@ export function Header() {
                     </Link>
                     {item.children && (
                       <div className="pl-4 mt-1 space-y-1">
-                        {item.children.map((child) => (
-                          <Link
-                            key={child.href}
-                            href={child.href}
-                            onClick={() => setMobileMenuOpen(false)}
-                            className={`block px-3 py-2 rounded-md text-sm ${
-                              isActive(child.href)
-                                ? "bg-flextide-primary text-white"
-                                : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
-                            }`}
-                          >
-                            {child.label}
-                          </Link>
-                        ))}
+                        {item.children.map((child, index) => {
+                          const isAddNew = child.label === "Add new integration";
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              onClick={() => setMobileMenuOpen(false)}
+                              className={`block px-3 py-2 rounded-md text-sm flex items-center gap-2 ${
+                                isActive(child.href)
+                                  ? "bg-flextide-primary text-white"
+                                  : "text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg"
+                              } ${isAddNew && index === item.children!.length - 1 ? "border-t border-flextide-neutral-border mt-1 pt-2" : ""}`}
+                            >
+                              {isAddNew && (
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 4v16m8-8H4"
+                                  />
+                                </svg>
+                              )}
+                              {child.label}
+                            </Link>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -361,16 +492,25 @@ export function Header() {
               </svg>
             </button>
 
-            {orgMenuOpen && organizations.length > 0 && (
+            {orgMenuOpen && (
               <div className="absolute right-0 mt-1 w-56 rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border shadow-lg py-1 z-50">
                 {organizations.map((org) => (
                   <button
                     key={org.uuid}
-                    onClick={() => {
-                      setCurrentOrgUuid(org.uuid);
-                      setCurrentOrganizationUuid(org.uuid);
-                      setOrgMenuOpen(false);
-                      // TODO: In production, switch organization via API
+                    onClick={async () => {
+                      if (org.uuid !== currentOrgUuid) {
+                        // Clear permissions cache when switching organizations
+                        const { clearPermissionsCache } = await import('@/lib/permissions');
+                        clearPermissionsCache();
+                        
+                        setCurrentOrgUuid(org.uuid);
+                        setCurrentOrganizationUuid(org.uuid);
+                        setOrgMenuOpen(false);
+                        // Reload page to refresh all data for the new organization
+                        window.location.reload();
+                      } else {
+                        setOrgMenuOpen(false);
+                      }
                     }}
                     className={`block w-full text-left px-4 py-2 text-sm transition-colors ${
                       org.uuid === currentOrgUuid
@@ -391,6 +531,29 @@ export function Header() {
                     </div>
                   </button>
                 ))}
+                <div className="border-t border-flextide-neutral-border my-1"></div>
+                <button
+                  onClick={() => {
+                    setOrgMenuOpen(false);
+                    setIsCreateOrgDialogOpen(true);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-flextide-neutral-text-dark hover:bg-flextide-neutral-light-bg transition-colors flex items-center gap-2"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                  Create New Organization
+                </button>
               </div>
             )}
           </div>
@@ -436,6 +599,18 @@ export function Header() {
           </div>
         </div>
       </div>
+
+      <CreateOrganizationDialog
+        isOpen={isCreateOrgDialogOpen}
+        onClose={() => setIsCreateOrgDialogOpen(false)}
+        onSuccess={async (newOrg) => {
+          // Switch to the newly created organization
+          setCurrentOrgUuid(newOrg.uuid);
+          setCurrentOrganizationUuid(newOrg.uuid);
+          // Reload page to refresh all data for the new organization
+          window.location.reload();
+        }}
+      />
     </header>
   );
 }
