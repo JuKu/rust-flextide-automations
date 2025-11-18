@@ -62,6 +62,7 @@ pub struct DatabaseEventSubscription {
 }
 
 /// Runtime event subscription
+#[allow(dead_code)] // Public API - may be used for future features
 pub struct RuntimeEventSubscription {
     /// Unique identifier
     pub id: String,

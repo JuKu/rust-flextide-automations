@@ -1,0 +1,222 @@
+---
+alwaysApply: false
+description: Defines the event system architecture, naming conventions, and best practices for emitting and handling events throughout the Flextide platform.
+---
+
+# Event System Rules
+
+## Overview
+
+The Flextide event system provides a flexible, extensible way to handle events throughout the platform. Events are emitted when important actions occur (create, update, delete operations) and can be subscribed to by modules, plugins, integrations, or external systems.
+
+## Event Naming Conventions
+
+All events must follow these naming conventions:
+
+### Core Events
+- **Format**: `core_<event_name>`
+- **Examples**:
+  - `core_user_created`
+  - `core_user_updated`
+  - `core_user_deleted`
+  - `core_organization_created`
+  - `core_organization_updated`
+  - `core_organization_deleted`
+
+### Module Events
+- **Format**: `module_<module_name>_<event_name>`
+- **Examples**:
+  - `module_crm_customer_created`
+  - `module_crm_customer_updated`
+  - `module_crm_customer_deleted`
+  - `module_crm_customer_note_created`
+  - `module_docs_document_created`
+  - `module_project_management_project_created`
+
+### Plugin Events
+- **Format**: `plugin_<plugin_name>_<event_name>`
+- **Examples**:
+  - `plugin_myplugin_action_executed`
+  - `plugin_myplugin_data_processed`
+
+### Integration Events
+- **Format**: `integration_<integration_name>_<event_name>`
+- **Examples**:
+  - `integration_jira_project_synced`
+  - `integration_slack_message_sent`
+
+## Event Naming Best Practices
+
+1. Use snake_case for all event names
+2. Use past tense for action events (created, updated, deleted, executed)
+3. Be specific about what entity the event relates to
+4. Keep event names concise but descriptive
+5. Use consistent naming patterns across similar entities
+
+## When to Emit Events
+
+Emit events for the following operations:
+
+### Create Operations
+- When a new entity is successfully created
+- Emit after the entity is persisted to the database
+- Include the created entity's data in the payload
+
+### Update Operations
+- When an entity is successfully updated
+- Emit after the update is persisted to the database
+- Include both old and new values in the payload (if applicable)
+
+### Delete Operations
+- When an entity is successfully deleted
+- Emit after the deletion is confirmed
+- Include the deleted entity's data in the payload (before deletion)
+
+## Event Payload Structure
+
+Event payloads should include:
+
+```json
+{
+  "entity_type": "customer",
+  "entity_id": "uuid-here",
+  "organization_uuid": "org-uuid",
+  "data": {
+    // Entity-specific data
+  }
+}
+```
+
+## Emitting Events
+
+### Basic Event Emission
+
+```rust
+use flextide_core::events::{Event, EventPayload};
+use serde_json::json;
+
+// Create event
+let event = Event::new(
+    "module_crm_customer_created",
+    EventPayload::new(json!({
+        "entity_type": "customer",
+        "entity_id": customer_uuid,
+        "data": {
+            "first_name": customer.first_name,
+            "last_name": customer.last_name,
+            // ... other fields
+        }
+    }))
+)
+.with_organization(&org_uuid)
+.with_user(&user_uuid);
+
+// Emit event
+dispatcher.emit(event).await;
+```
+
+### Event Dispatcher Access
+
+The event dispatcher should be:
+- Stored in application state (e.g., Axum Extension)
+- Passed to modules that need to emit events
+- Initialized at application startup
+
+## Event System Architecture
+
+### Components
+
+1. **EventDispatcher**: Manages subscribers and dispatches events
+2. **EventSubscriber**: Trait for event handlers
+3. **Database Subscriptions**: Persistent subscriptions loaded at startup
+4. **Runtime Subscriptions**: In-memory subscriptions registered at runtime
+
+### Subscription Types
+
+- **Database-backed**: Stored in `event_subscriptions` table, cached in memory
+- **Runtime**: Registered programmatically, in-memory only
+
+### Future Connectors
+
+The event system is designed to support:
+- Webhook connectors (HTTP POST to external URLs)
+- Kafka connectors (publish to Kafka topics)
+- Function connectors (call internal functions)
+- Custom connectors (extensible architecture)
+
+## Best Practices
+
+1. **Always emit events after successful operations** - Don't emit events if the operation fails
+2. **Include relevant context** - Add organization_uuid and user_uuid when available
+3. **Keep payloads focused** - Include only necessary data, not entire database records
+4. **Handle errors gracefully** - Event emission errors should not break the main operation
+5. **Use appropriate event names** - Follow naming conventions strictly
+6. **Document events** - Document what events are emitted and when
+
+## Error Handling
+
+Event emission should not block the main operation:
+
+```rust
+// Emit event (non-blocking, errors are logged but don't fail the operation)
+if let Err(e) = dispatcher.emit(event).await {
+    tracing::warn!("Failed to emit event: {}", e);
+    // Continue with operation - event failure shouldn't break the main flow
+}
+```
+
+## Organization Scoping
+
+Events can be scoped to organizations:
+- Include `organization_uuid` when emitting organization-scoped events
+- Subscribers can filter by organization UUID
+- Global events (no organization UUID) are received by all subscribers
+
+## Examples
+
+### Core User Created Event
+
+```rust
+let event = Event::new(
+    "core_user_created",
+    EventPayload::new(json!({
+        "entity_type": "user",
+        "entity_id": user.uuid,
+        "data": {
+            "email": user.email,
+            "prename": user.prename,
+            "lastname": user.lastname
+        }
+    }))
+)
+.with_user(&user.uuid);
+
+dispatcher.emit(event).await;
+```
+
+### Module Customer Updated Event
+
+```rust
+let event = Event::new(
+    "module_crm_customer_updated",
+    EventPayload::new(json!({
+        "entity_type": "customer",
+        "entity_id": customer.uuid,
+        "organization_uuid": customer.organization_uuid,
+        "data": {
+            "first_name": customer.first_name,
+            "last_name": customer.last_name,
+            "email": customer.email
+        }
+    }))
+)
+.with_organization(&customer.organization_uuid)
+.with_user(&user_uuid);
+
+dispatcher.emit(event).await;
+```
+
+## References
+
+- Event system implementation: `backend/crates/flextide-core/src/events/`
+- Event system documentation: `backend/crates/flextide-core/src/events/README.md`

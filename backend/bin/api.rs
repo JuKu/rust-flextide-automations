@@ -37,12 +37,23 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to ensure default admin user: {}", e))?;
     tracing::info!("Default admin user ensured (admin@example.com / admin)");
 
+    // Initialize event dispatcher
+    tracing::info!("Initializing event system...");
+    let event_dispatcher = flextide_core::events::EventDispatcher::new();
+    
+    // Load database-backed event subscriptions
+    flextide_core::events::initialize(&event_dispatcher, &db_pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize event system: {}", e))?;
+    tracing::info!("Event system initialized");
+
     // JWT secret (in production, use environment variable)
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
 
     let app_state = AppState {
         jwt_secret,
         db_pool,
+        event_dispatcher,
     };
     let app = create_app(app_state);
 

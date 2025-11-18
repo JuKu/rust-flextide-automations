@@ -21,6 +21,7 @@ use tower_http::{
 pub struct AppState {
     pub jwt_secret: String,
     pub db_pool: flextide_core::database::DatabasePool,
+    pub event_dispatcher: flextide_core::events::EventDispatcher,
 }
 
 // Re-export Claims from flextide-core for convenience
@@ -262,6 +263,9 @@ pub async fn organization_middleware(
     
     // Attach database pool to request extensions for use in handlers
     request.extensions_mut().insert(state.db_pool.clone());
+    
+    // Attach event dispatcher to request extensions for use in handlers
+    request.extensions_mut().insert(state.event_dispatcher.clone());
 
     next.run(request).await
 }
@@ -888,6 +892,24 @@ pub async fn create_organization(
         org_uuid,
         claims.user_uuid
     );
+
+    // Emit organization created event
+    let event = flextide_core::events::Event::new(
+        "core_organization_created",
+        flextide_core::events::EventPayload::new(json!({
+            "entity_type": "organization",
+            "entity_id": org_uuid,
+            "data": {
+                "name": name,
+                "owner_user_id": claims.user_uuid
+            }
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    // Emit event (non-blocking - errors are logged internally)
+    state.event_dispatcher.emit(event).await;
 
     Ok(Json(json!({
         "uuid": org_uuid,

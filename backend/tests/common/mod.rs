@@ -219,9 +219,13 @@ pub async fn create_test_app() -> axum::Router {
     .await
     .expect("Failed to create module_crm_customer_addresses table");
     
+    // Initialize event dispatcher for tests
+    let event_dispatcher = flextide_core::events::EventDispatcher::new();
+    
     let app_state = AppState {
         jwt_secret,
         db_pool: db_pool.clone(),
+        event_dispatcher,
     };
     create_app(app_state)
 }
@@ -451,9 +455,13 @@ pub async fn create_test_app_with_org() -> (axum::Router, String, String, String
     // Set up test organization in the same database
     let (org_uuid, user_uuid, email) = setup_test_organization_in_pool(&db_pool).await;
     
+    // Initialize event dispatcher for tests
+    let event_dispatcher = flextide_core::events::EventDispatcher::new();
+    
     let app_state = AppState {
         jwt_secret,
         db_pool,
+        event_dispatcher,
     };
     let app = create_app(app_state);
     

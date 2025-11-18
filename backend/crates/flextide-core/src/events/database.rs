@@ -98,6 +98,7 @@ pub async fn load_event_subscriptions(
 }
 
 /// Create a new event subscription in the database
+#[allow(dead_code)] // Public API - will be used by other modules
 pub async fn create_event_subscription(
     pool: &DatabasePool,
     subscription: &DatabaseEventSubscription,
@@ -161,6 +162,7 @@ pub async fn create_event_subscription(
 }
 
 /// Delete event subscriptions created by a specific source (e.g., plugin)
+#[allow(dead_code)] // Public API - will be used by other modules
 pub async fn delete_subscriptions_by_source(
     pool: &DatabasePool,
     created_from: &str,
