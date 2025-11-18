@@ -2,6 +2,7 @@
 //! 
 //! Core functionality for the Flextide workflow automation platform.
 
+pub mod credentials;
 pub mod database;
 pub mod events;
 pub mod jwt;
