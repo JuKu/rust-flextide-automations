@@ -4,8 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
+use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::Row;
 use thiserror::Error;
 
@@ -296,6 +298,7 @@ pub async fn create_area(
     organization_uuid: &str,
     user_uuid: &str,
     request: CreateDocsAreaRequest,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<String, DocsAreaDatabaseError> {
     // Validate short name
     if request.short_name.trim().is_empty() {
@@ -400,6 +403,31 @@ pub async fn create_area(
         }
     }
 
+    // Emit area created event
+    if let Some(disp) = dispatcher {
+        let area = load_area_by_uuid(pool, &area_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_area_created",
+            EventPayload::new(json!({
+                "entity_type": "area",
+                "entity_id": area_uuid,
+                "organization_uuid": organization_uuid,
+                "data": area.as_ref().map(|a| json!({
+                    "short_name": a.short_name,
+                    "description": a.description,
+                    "icon_name": a.icon_name,
+                    "public": a.public,
+                    "visible": a.visible,
+                    "deletable": a.deletable
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(area_uuid)
 }
 
@@ -424,6 +452,7 @@ pub async fn update_area(
     organization_uuid: &str,
     user_uuid: &str,
     request: UpdateDocsAreaRequest,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsAreaDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -677,6 +706,31 @@ pub async fn update_area(
         }
     }
 
+    // Emit area updated event
+    if let Some(disp) = dispatcher {
+        let area = load_area_by_uuid(pool, area_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_area_updated",
+            EventPayload::new(json!({
+                "entity_type": "area",
+                "entity_id": area_uuid,
+                "organization_uuid": organization_uuid,
+                "data": area.as_ref().map(|a| json!({
+                    "short_name": a.short_name,
+                    "description": a.description,
+                    "icon_name": a.icon_name,
+                    "public": a.public,
+                    "visible": a.visible,
+                    "deletable": a.deletable
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(())
 }
 
@@ -700,6 +754,7 @@ pub async fn delete_area(
     area_uuid: &str,
     organization_uuid: &str,
     user_uuid: &str,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsAreaDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -714,6 +769,7 @@ pub async fn delete_area(
     }
 
     // Load area to verify it belongs to the organization and check deletable flag
+    // Also load it before deletion for event payload
     let area = load_area_by_uuid(pool, area_uuid).await?;
 
     if area.organization_uuid != organization_uuid {
@@ -797,6 +853,30 @@ pub async fn delete_area(
                 return Err(DocsAreaDatabaseError::AreaNotFound);
             }
         }
+    }
+
+    // Emit area deleted event (before deletion, we already have the area data)
+    if let Some(disp) = dispatcher {
+        let event = Event::new(
+            "module_docs_area_deleted",
+            EventPayload::new(json!({
+                "entity_type": "area",
+                "entity_id": area_uuid,
+                "organization_uuid": organization_uuid,
+                "data": json!({
+                    "short_name": area.short_name,
+                    "description": area.description,
+                    "icon_name": area.icon_name,
+                    "public": area.public,
+                    "visible": area.visible,
+                    "deletable": area.deletable
+                })
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
     }
 
     Ok(())

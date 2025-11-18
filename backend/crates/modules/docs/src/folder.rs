@@ -4,8 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
+use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::Row;
 use thiserror::Error;
 
@@ -354,6 +356,7 @@ pub async fn create_folder(
     organization_uuid: &str,
     user_uuid: &str,
     request: CreateDocsFolderRequest,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<String, DocsFolderDatabaseError> {
     // Validate name
     if request.name.trim().is_empty() {
@@ -526,6 +529,31 @@ pub async fn create_folder(
         }
     }
 
+    // Emit folder created event
+    if let Some(disp) = dispatcher {
+        let folder = load_folder_by_uuid(pool, &folder_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_folder_created",
+            EventPayload::new(json!({
+                "entity_type": "folder",
+                "entity_id": folder_uuid,
+                "organization_uuid": organization_uuid,
+                "data": folder.as_ref().map(|f| json!({
+                    "name": f.name,
+                    "icon_name": f.icon_name,
+                    "folder_color": f.folder_color,
+                    "area_uuid": f.area_uuid,
+                    "parent_folder_uuid": f.parent_folder_uuid,
+                    "sort_order": f.sort_order
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(folder_uuid)
 }
 
@@ -553,6 +581,7 @@ pub async fn delete_folder(
     folder_uuid: &str,
     organization_uuid: &str,
     user_uuid: &str,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsFolderDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -755,6 +784,30 @@ pub async fn delete_folder(
         }
     }
 
+    // Emit folder deleted event (before deletion, we already have the folder data)
+    if let Some(disp) = dispatcher {
+        let event = Event::new(
+            "module_docs_folder_deleted",
+            EventPayload::new(json!({
+                "entity_type": "folder",
+                "entity_id": folder_uuid,
+                "organization_uuid": organization_uuid,
+                "data": json!({
+                    "name": folder.name,
+                    "icon_name": folder.icon_name,
+                    "folder_color": folder.folder_color,
+                    "area_uuid": folder.area_uuid,
+                    "parent_folder_uuid": folder.parent_folder_uuid,
+                    "sort_order": folder.sort_order
+                })
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(())
 }
 
@@ -784,6 +837,7 @@ pub async fn update_folder_name(
     organization_uuid: &str,
     user_uuid: &str,
     name: String,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsFolderDatabaseError> {
     // Validate name
     if name.trim().is_empty() {
@@ -930,6 +984,31 @@ pub async fn update_folder_name(
         }
     }
 
+    // Emit folder updated event
+    if let Some(disp) = dispatcher {
+        let folder = load_folder_by_uuid(pool, folder_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_folder_updated",
+            EventPayload::new(json!({
+                "entity_type": "folder",
+                "entity_id": folder_uuid,
+                "organization_uuid": organization_uuid,
+                "data": folder.as_ref().map(|f| json!({
+                    "name": f.name,
+                    "icon_name": f.icon_name,
+                    "folder_color": f.folder_color,
+                    "area_uuid": f.area_uuid,
+                    "parent_folder_uuid": f.parent_folder_uuid,
+                    "sort_order": f.sort_order
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(())
 }
 
@@ -958,6 +1037,7 @@ pub async fn reorder_folder(
     organization_uuid: &str,
     user_uuid: &str,
     sort_order: i32,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsFolderDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -1097,6 +1177,31 @@ pub async fn reorder_folder(
                 return Err(DocsFolderDatabaseError::FolderNotFound);
             }
         }
+    }
+
+    // Emit folder updated event (reorder is also an update)
+    if let Some(disp) = dispatcher {
+        let folder = load_folder_by_uuid(pool, folder_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_folder_updated",
+            EventPayload::new(json!({
+                "entity_type": "folder",
+                "entity_id": folder_uuid,
+                "organization_uuid": organization_uuid,
+                "data": folder.as_ref().map(|f| json!({
+                    "name": f.name,
+                    "icon_name": f.icon_name,
+                    "folder_color": f.folder_color,
+                    "area_uuid": f.area_uuid,
+                    "parent_folder_uuid": f.parent_folder_uuid,
+                    "sort_order": f.sort_order
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
     }
 
     Ok(())

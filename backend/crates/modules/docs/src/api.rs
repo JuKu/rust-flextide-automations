@@ -11,6 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 use flextide_core::database::DatabasePool;
+use flextide_core::events::EventDispatcher;
 use flextide_core::jwt::Claims;
 use serde_json::{json, Value as JsonValue};
 
@@ -143,6 +144,7 @@ pub async fn create_area_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Json(request): Json<CreateDocsAreaRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
     // Sanity checks
@@ -162,7 +164,7 @@ pub async fn create_area_endpoint(
     }
 
     // Create area (permission checks are done inside create_area)
-    let area_uuid = create_area(&pool, &org_uuid, &claims.user_uuid, request)
+    let area_uuid = create_area(&pool, &org_uuid, &claims.user_uuid, request, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error creating area: {}", e);
@@ -264,6 +266,7 @@ pub async fn update_area_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(area_uuid): Path<String>,
     Json(request): Json<UpdateDocsAreaRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
@@ -285,7 +288,7 @@ pub async fn update_area_endpoint(
     }
 
     // Update area (permission checks are done inside update_area)
-    update_area(&pool, &area_uuid, &org_uuid, &claims.user_uuid, request)
+    update_area(&pool, &area_uuid, &org_uuid, &claims.user_uuid, request, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error updating area: {}", e);
@@ -339,6 +342,7 @@ pub async fn delete_area_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(area_uuid): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
     // Load area first to get data for response (before deletion)
@@ -365,7 +369,7 @@ pub async fn delete_area_endpoint(
     }
 
     // Delete area (permission checks are done inside delete_area)
-    delete_area(&pool, &area_uuid, &org_uuid, &claims.user_uuid)
+    delete_area(&pool, &area_uuid, &org_uuid, &claims.user_uuid, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error deleting area: {}", e);
@@ -482,6 +486,7 @@ pub async fn create_folder_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(area_uuid): Path<String>,
     Json(mut request): Json<CreateDocsFolderRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
@@ -505,7 +510,7 @@ pub async fn create_folder_endpoint(
     }
 
     // Create folder (permission checks are done inside create_folder)
-    let folder_uuid = create_folder(&pool, &org_uuid, &claims.user_uuid, request)
+    let folder_uuid = create_folder(&pool, &org_uuid, &claims.user_uuid, request, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error creating folder: {}", e);
@@ -554,10 +559,11 @@ pub async fn delete_folder_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(folder_uuid): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
     // Delete folder (permission checks are done inside delete_folder)
-    delete_folder(&pool, &folder_uuid, &org_uuid, &claims.user_uuid)
+    delete_folder(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error deleting folder: {}", e);
@@ -601,6 +607,7 @@ pub async fn update_folder_name_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(folder_uuid): Path<String>,
     Json(request): Json<UpdateDocsFolderRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
@@ -626,7 +633,7 @@ pub async fn update_folder_name_endpoint(
     }
 
     // Update folder name (permission checks are done inside update_folder_name)
-    update_folder_name(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, name)
+    update_folder_name(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, name, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error updating folder name: {}", e);
@@ -670,6 +677,7 @@ pub async fn reorder_folder_endpoint(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(folder_uuid): Path<String>,
     Json(request): Json<UpdateDocsFolderRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
@@ -680,7 +688,7 @@ pub async fn reorder_folder_endpoint(
     ))?;
 
     // Reorder folder (permission checks are done inside reorder_folder)
-    reorder_folder(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, sort_order)
+    reorder_folder(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, sort_order, Some(&dispatcher))
         .await
         .map_err(|e| {
             tracing::error!("Error reordering folder: {}", e);

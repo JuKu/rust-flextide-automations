@@ -4,8 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
+use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::Row;
 use thiserror::Error;
 
@@ -212,6 +214,7 @@ pub async fn create_page(
     organization_uuid: &str,
     user_uuid: &str,
     request: CreateDocsPageRequest,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<String, DocsPageDatabaseError> {
     // Validate title
     if request.title.trim().is_empty() {
@@ -373,6 +376,31 @@ pub async fn create_page(
         }
     }
 
+    // Emit page created event
+    if let Some(disp) = dispatcher {
+        let page = load_page_by_uuid(pool, &page_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_page_created",
+            EventPayload::new(json!({
+                "entity_type": "page",
+                "entity_id": page_uuid,
+                "organization_uuid": organization_uuid,
+                "data": page.as_ref().map(|p| json!({
+                    "title": p.title,
+                    "short_summary": p.short_summary,
+                    "area_uuid": p.area_uuid,
+                    "folder_uuid": p.folder_uuid,
+                    "parent_page_uuid": p.parent_page_uuid,
+                    "page_type": p.page_type
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
     Ok(page_uuid)
 }
 
@@ -399,6 +427,7 @@ pub async fn delete_page(
     page_uuid: &str,
     organization_uuid: &str,
     user_uuid: &str,
+    dispatcher: Option<&EventDispatcher>,
 ) -> Result<(), DocsPageDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -413,6 +442,7 @@ pub async fn delete_page(
     }
 
     // Load page to verify it belongs to the organization
+    // Also load it before deletion for event payload
     let page = load_page_by_uuid(pool, page_uuid).await?;
 
     if page.organization_uuid != organization_uuid {
@@ -542,6 +572,30 @@ pub async fn delete_page(
                 return Err(DocsPageDatabaseError::PageNotFound);
             }
         }
+    }
+
+    // Emit page deleted event (before deletion, we already have the page data)
+    if let Some(disp) = dispatcher {
+        let event = Event::new(
+            "module_docs_page_deleted",
+            EventPayload::new(json!({
+                "entity_type": "page",
+                "entity_id": page_uuid,
+                "organization_uuid": organization_uuid,
+                "data": json!({
+                    "title": page.title,
+                    "short_summary": page.short_summary,
+                    "area_uuid": page.area_uuid,
+                    "folder_uuid": page.folder_uuid,
+                    "parent_page_uuid": page.parent_page_uuid,
+                    "page_type": page.page_type
+                })
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
     }
 
     Ok(())
