@@ -19,6 +19,7 @@ use crate::customer::{
     UpdateCrmCustomerNoteRequest,
 };
 use flextide_core::database::DatabasePool;
+use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::jwt::Claims;
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 
@@ -29,6 +30,7 @@ pub async fn create_customer(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Json(request): Json<CreateCrmCustomerRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
     // Sanity checks
@@ -116,6 +118,31 @@ pub async fn create_customer(
             )
         })?;
 
+    // Load the created customer to include in event payload
+    let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .ok();
+
+    // Emit customer created event
+    let event = Event::new(
+        "module_crm_customer_created",
+        EventPayload::new(json!({
+            "entity_type": "customer",
+            "entity_id": customer_uuid,
+            "data": customer.as_ref().map(|c| json!({
+                "first_name": c.first_name,
+                "last_name": c.last_name,
+                "email": c.email,
+                "company_name": c.company_name
+            })).unwrap_or(json!({}))
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    // Emit event (non-blocking - errors are logged internally)
+    dispatcher.emit(event).await;
+
     Ok(Json(json!({
         "uuid": customer_uuid,
         "message": "Customer created successfully"
@@ -129,6 +156,7 @@ pub async fn delete_customer(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(customer_uuid): Path<String>,
 ) -> Result<Json<JsonValue>, (StatusCode, Json<JsonValue>)> {
     // Check if user belongs to organization
@@ -167,7 +195,7 @@ pub async fn delete_customer(
         ));
     }
 
-    // Load customer to verify it belongs to the organization
+    // Load customer to verify it belongs to the organization (and get data for event)
     let customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
         .await
         .map_err(|e| {
@@ -186,6 +214,14 @@ pub async fn delete_customer(
         ));
     }
 
+    // Store customer data for event (before deletion)
+    let customer_data = json!({
+        "first_name": customer.first_name,
+        "last_name": customer.last_name,
+        "email": customer.email,
+        "company_name": customer.company_name
+    });
+
     // Delete customer
     customer
         .delete(&pool)
@@ -197,6 +233,21 @@ pub async fn delete_customer(
                 Json(json!({ "error": "Failed to delete customer" })),
             )
         })?;
+
+    // Emit customer deleted event
+    let event = Event::new(
+        "module_crm_customer_deleted",
+        EventPayload::new(json!({
+            "entity_type": "customer",
+            "entity_id": customer_uuid,
+            "data": customer_data
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    // Emit event (non-blocking - errors are logged internally)
+    dispatcher.emit(event).await;
 
     Ok(Json(json!({
         "message": "Customer deleted successfully"
@@ -1097,6 +1148,7 @@ pub async fn update_customer(
     Extension(pool): Extension<DatabasePool>,
     Extension(org_uuid): Extension<String>,
     Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
     Path(customer_uuid): Path<String>,
     Json(request): Json<UpdateCrmCustomerRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
@@ -1166,6 +1218,31 @@ pub async fn update_customer(
                 Json(json!({ "error": "Failed to update customer" })),
             )
         })?;
+
+    // Reload customer to get updated data for event
+    let updated_customer = CrmCustomer::load_from_database(&pool, &customer_uuid)
+        .await
+        .ok();
+
+    // Emit customer updated event
+    let event = Event::new(
+        "module_crm_customer_updated",
+        EventPayload::new(json!({
+            "entity_type": "customer",
+            "entity_id": customer_uuid,
+            "data": updated_customer.as_ref().map(|c| json!({
+                "first_name": c.first_name,
+                "last_name": c.last_name,
+                "email": c.email,
+                "company_name": c.company_name
+            })).unwrap_or(json!({}))
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    // Emit event (non-blocking - errors are logged internally)
+    dispatcher.emit(event).await;
 
     Ok(Json(json!({
         "message": "Customer updated successfully"
