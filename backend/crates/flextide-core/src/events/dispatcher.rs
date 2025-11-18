@@ -6,6 +6,7 @@ use crate::database::DatabasePool;
 use crate::events::database::load_event_subscriptions;
 use crate::events::subscriber::{DatabaseEventSubscription, EventSubscriber};
 use crate::events::types::Event;
+use crate::events::webhooks::{load_webhooks, send_webhook, Webhook};
 use dashmap::DashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -18,6 +19,8 @@ pub struct EventDispatcher {
     database_subscriptions: Arc<DashMap<String, Vec<DatabaseEventSubscription>>>,
     /// Runtime-registered subscriptions
     runtime_subscriptions: Arc<DashMap<String, Vec<Arc<dyn EventSubscriber>>>>,
+    /// Webhooks (cached in memory, grouped by event_name)
+    webhooks: Arc<DashMap<String, Vec<Webhook>>>,
 }
 
 impl EventDispatcher {
@@ -26,6 +29,7 @@ impl EventDispatcher {
         Self {
             database_subscriptions: Arc::new(DashMap::new()),
             runtime_subscriptions: Arc::new(DashMap::new()),
+            webhooks: Arc::new(DashMap::new()),
         }
     }
 
@@ -64,6 +68,53 @@ impl EventDispatcher {
         );
 
         Ok(())
+    }
+
+    /// Load all active webhooks from the database into memory
+    ///
+    /// This should be called once at application startup to cache
+    /// all webhooks for efficient event dispatching.
+    pub async fn load_webhooks(
+        &self,
+        pool: &DatabasePool,
+    ) -> Result<(), EventDispatcherError> {
+        debug!("Loading webhooks from database");
+
+        let webhooks = load_webhooks(pool).await?;
+        let total_count = webhooks.len();
+
+        // Clear existing webhooks
+        self.webhooks.clear();
+
+        // Group webhooks by event name
+        for webhook in webhooks {
+            if !webhook.active {
+                continue;
+            }
+
+            self.webhooks
+                .entry(webhook.event_name.clone())
+                .or_insert_with(Vec::new)
+                .push(webhook);
+        }
+
+        debug!(
+            "Loaded {} webhooks for {} events",
+            total_count,
+            self.webhooks.len()
+        );
+
+        Ok(())
+    }
+
+    /// Reload webhooks from the database
+    ///
+    /// Useful when webhooks are created, updated, or deleted at runtime.
+    pub async fn reload_webhooks(
+        &self,
+        pool: &DatabasePool,
+    ) -> Result<(), EventDispatcherError> {
+        self.load_webhooks(pool).await
     }
 
     /// Register a runtime event subscriber
@@ -166,6 +217,42 @@ impl EventDispatcher {
                         );
                     }
                 }
+            }
+        }
+
+        // Handle webhooks
+        if let Some(webhooks) = self.webhooks.get(event_name) {
+            // Filter webhooks by organization UUID
+            let matching_webhooks: Vec<_> = webhooks
+                .iter()
+                .filter(|webhook| {
+                    // Only send to webhooks that match the event's organization
+                    if let Some(ref event_org_uuid) = event.organization_uuid {
+                        webhook.organization_uuid == *event_org_uuid
+                    } else {
+                        // If event has no organization, don't send to organization-scoped webhooks
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+
+            // Send webhooks asynchronously (non-blocking)
+            for webhook in matching_webhooks {
+                let webhook_clone = webhook.clone();
+                let event_clone = event.clone();
+                
+                // Spawn async task to send webhook (fire and forget)
+                tokio::spawn(async move {
+                    match send_webhook(&webhook_clone, &event_clone).await {
+                        Ok(_) => {
+                            debug!("Webhook delivered: {}", webhook_clone.url);
+                        }
+                        Err(e) => {
+                            error!("Failed to deliver webhook {}: {}", webhook_clone.url, e);
+                        }
+                    }
+                });
             }
         }
     }
