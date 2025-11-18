@@ -49,6 +49,8 @@ const baseMenuItems: MenuItem[] = [
     href: "/modules",
     children: [
       { label: "CRM", href: "/modules/crm" },
+      { label: "Project Management", href: "/modules/project-management" },
+      { label: "Docs", href: "/modules/docs" },
     ],
   },
   { label: "Marketplace", href: "/marketplace" },

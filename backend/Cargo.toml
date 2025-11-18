@@ -20,6 +20,8 @@ members = [
     "crates/node_registry",
     "crates/node_stdlib",
     "crates/modules/crm",
+    "crates/modules/project-management",
+    "crates/modules/docs",
     "crates/integrations"
 ]
 resolver = "3"

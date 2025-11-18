@@ -1,0 +1,17 @@
+[package]
+name = "flextide-modules-project-management"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8.6"
+async-trait = "0.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "mysql", "postgres", "sqlite", "chrono"] }
+thiserror = "2.0.17"
+tracing = "0.1"
+flextide-core = { path = "../../flextide-core" }
+
