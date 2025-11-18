@@ -367,10 +367,17 @@ pub async fn update_webhook(
 
     match pool {
         DatabasePool::MySql(p) => {
-            // MySQL uses ? placeholders
+            // MySQL uses ? placeholders (not ?1, ?2, etc.)
+            // Replace $1, $2, etc. with just ?
+            // Replace in reverse order to avoid $1 matching in $10, $11, etc.
+            let mut mysql_update_clause = update_clause.clone();
+            for i in (1..=bind_index).rev() {
+                mysql_update_clause = mysql_update_clause.replace(&format!("${}", i), "?");
+            }
+            
             let query = format!(
                 "UPDATE event_webhooks SET {} WHERE id = ? AND organization_uuid = ?",
-                update_clause.replace('$', "?")
+                mysql_update_clause
             );
             
             let mut query_builder = sqlx::query(&query);

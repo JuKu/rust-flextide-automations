@@ -654,3 +654,107 @@ pub struct RepositoryFull {
     pub network_count: Option<u64>,
 }
 
+/// Issue label
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Label {
+    pub id: u64,
+    pub node_id: String,
+    pub url: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub default: Option<bool>,
+}
+
+/// Pull request information (when issue is a PR)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequest {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub diff_url: Option<String>,
+    #[serde(default)]
+    pub patch_url: Option<String>,
+}
+
+/// Milestone information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Milestone {
+    pub url: String,
+    pub html_url: String,
+    pub labels_url: String,
+    pub id: u64,
+    pub node_id: String,
+    pub number: u64,
+    pub state: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub creator: Option<User>,
+    #[serde(default)]
+    pub open_issues: Option<u64>,
+    #[serde(default)]
+    pub closed_issues: Option<u64>,
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub closed_at: Option<String>,
+    #[serde(default)]
+    pub due_on: Option<String>,
+}
+
+/// GitHub Issue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Issue {
+    pub id: u64,
+    pub node_id: String,
+    pub url: String,
+    pub repository_url: String,
+    pub labels_url: String,
+    pub comments_url: String,
+    pub events_url: String,
+    pub html_url: String,
+    pub number: u64,
+    pub state: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    pub user: User,
+    #[serde(default)]
+    pub labels: Option<Vec<Label>>,
+    #[serde(default)]
+    pub assignee: Option<User>,
+    #[serde(default)]
+    pub assignees: Option<Vec<User>>,
+    #[serde(default)]
+    pub milestone: Option<Milestone>,
+    #[serde(default)]
+    pub locked: Option<bool>,
+    #[serde(default)]
+    pub active_lock_reason: Option<String>,
+    #[serde(default)]
+    pub comments: Option<u64>,
+    #[serde(default)]
+    pub pull_request: Option<PullRequest>,
+    #[serde(default)]
+    pub closed_at: Option<String>,
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub closed_by: Option<User>,
+    #[serde(default)]
+    pub author_association: Option<String>,
+    #[serde(default)]
+    pub state_reason: Option<String>,
+    #[serde(default)]
+    pub repository: Option<Repository>,
+}
+

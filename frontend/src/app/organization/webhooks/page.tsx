@@ -2,16 +2,23 @@
 
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { listWebhooks, Webhook } from "@/lib/api";
+import { listWebhooks, deleteWebhook, Webhook } from "@/lib/api";
 import { getCurrentOrganizationUuid } from "@/lib/organization";
 import { CreateWebhookDialog } from "@/components/organization/CreateWebhookDialog";
+import { EditWebhookDialog } from "@/components/organization/EditWebhookDialog";
+import { DeleteWebhookDialog } from "@/components/organization/DeleteWebhookDialog";
 import { hasPermission } from "@/lib/permissions";
+import { showToast } from "@/lib/toast";
 
 export default function WebhooksPage() {
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedWebhook, setSelectedWebhook] = useState<Webhook | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [canCreate, setCanCreate] = useState(false);
   const [canSee, setCanSee] = useState(false);
 
@@ -75,6 +82,42 @@ export default function WebhooksPage() {
   const handleWebhookCreated = () => {
     setIsCreateDialogOpen(false);
     fetchWebhooks();
+  };
+
+  const handleEditClick = (webhook: Webhook) => {
+    setSelectedWebhook(webhook);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleEditSuccess = () => {
+    setIsEditDialogOpen(false);
+    setSelectedWebhook(null);
+    fetchWebhooks();
+  };
+
+  const handleDeleteClick = (webhook: Webhook) => {
+    setSelectedWebhook(webhook);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedWebhook) return;
+
+    try {
+      setDeleteLoading(true);
+      await deleteWebhook(selectedWebhook.id);
+      showToast("Webhook deleted successfully", "success");
+      setIsDeleteDialogOpen(false);
+      setSelectedWebhook(null);
+      fetchWebhooks();
+    } catch (err) {
+      console.error("Failed to delete webhook:", err);
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to delete webhook";
+      showToast(errorMessage, "error");
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   if (loading) {
@@ -159,6 +202,11 @@ export default function WebhooksPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-flextide-neutral-text-dark uppercase tracking-wider">
                     Created
                   </th>
+                  {canCreate && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-flextide-neutral-text-dark uppercase tracking-wider">
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-flextide-neutral-border">
@@ -193,6 +241,52 @@ export default function WebhooksPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-flextide-neutral-text-medium">
                       {new Date(webhook.created_at).toLocaleDateString()}
                     </td>
+                    {canCreate && (
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleEditClick(webhook)}
+                            className="p-2 text-flextide-primary-accent hover:bg-flextide-primary-accent/10 rounded-md transition-colors"
+                            title="Edit webhook"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-4 w-4"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteClick(webhook)}
+                            className="p-2 text-flextide-error hover:bg-flextide-error/10 rounded-md transition-colors"
+                            title="Delete webhook"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-4 w-4"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -204,6 +298,27 @@ export default function WebhooksPage() {
           isOpen={isCreateDialogOpen}
           onClose={() => setIsCreateDialogOpen(false)}
           onSuccess={handleWebhookCreated}
+        />
+
+        <EditWebhookDialog
+          isOpen={isEditDialogOpen}
+          onClose={() => {
+            setIsEditDialogOpen(false);
+            setSelectedWebhook(null);
+          }}
+          onSuccess={handleEditSuccess}
+          webhook={selectedWebhook}
+        />
+
+        <DeleteWebhookDialog
+          isOpen={isDeleteDialogOpen}
+          onClose={() => {
+            setIsDeleteDialogOpen(false);
+            setSelectedWebhook(null);
+          }}
+          onConfirm={handleDeleteConfirm}
+          webhook={selectedWebhook}
+          loading={deleteLoading}
         />
       </div>
     </AppLayout>

@@ -1855,11 +1855,56 @@ pub async fn get_webhook(
 /// Updates an existing webhook
 pub async fn update_webhook(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Extension(org_uuid): Extension<String>,
     Path(webhook_id): Path<String>,
     Json(payload): Json<flextide_core::events::UpdateWebhookRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission (using create permission for edit, as it's the same level of access)
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "organization_can_create_event_webhooks",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to edit event webhooks"
+            })),
+        ));
+    }
+
     flextide_core::events::update_webhook(&state.db_pool, &webhook_id, &org_uuid, &payload)
         .await
         .map_err(|e| {
@@ -1888,10 +1933,55 @@ pub async fn update_webhook(
 /// Deletes a webhook by ID
 pub async fn delete_webhook(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Extension(org_uuid): Extension<String>,
     Path(webhook_id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission (using create permission for delete, as it's the same level of access)
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "organization_can_create_event_webhooks",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to delete event webhooks"
+            })),
+        ));
+    }
+
     flextide_core::events::delete_webhook(&state.db_pool, &webhook_id, &org_uuid)
         .await
         .map_err(|e| {
