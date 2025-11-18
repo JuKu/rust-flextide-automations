@@ -1647,9 +1647,54 @@ pub async fn search_integrations(
 /// Returns a list of all webhooks for the authenticated user's organization
 pub async fn list_webhooks(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Extension(org_uuid): Extension<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "organization_can_see_event_webhooks",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to see event webhooks"
+            })),
+        ));
+    }
+
     let webhooks = flextide_core::events::load_webhooks_by_organization(&state.db_pool, &org_uuid)
         .await
         .map_err(|e| {
@@ -1691,6 +1736,51 @@ pub async fn create_webhook(
     Extension(org_uuid): Extension<String>,
     Json(payload): Json<flextide_core::events::CreateWebhookRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use flextide_core::user::{user_belongs_to_organization, user_has_permission};
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "organization_can_create_event_webhooks",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to create event webhooks"
+            })),
+        ));
+    }
+
     let webhook_id = flextide_core::events::create_webhook(
         &state.db_pool,
         &org_uuid,

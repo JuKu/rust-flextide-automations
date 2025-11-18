@@ -4,9 +4,11 @@
 //! This crate contains reusable client implementations for various third-party services
 //! that can be used by nodes in the workflow automation platform.
 
+pub mod github;
 pub mod jira;
 pub mod openai;
 
+pub use github::GitHubClient;
 pub use jira::JiraClient;
 pub use openai::OpenAIClient;
 

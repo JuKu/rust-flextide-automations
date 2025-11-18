@@ -1252,3 +1252,104 @@ export async function getLastExecutions(
   }
 }
 
+export interface Webhook {
+  id: string;
+  organization_uuid: string;
+  event_name: string;
+  url: string;
+  secret: boolean;
+  headers: any;
+  active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateWebhookRequest {
+  event_name: string;
+  url: string;
+  secret?: string;
+  headers?: any;
+}
+
+/**
+ * List all webhooks for the current organization
+ */
+export async function listWebhooks(): Promise<Webhook[]> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/webhooks'), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch webhooks:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new webhook
+ */
+export async function createWebhook(request: CreateWebhookRequest): Promise<{ id: string; message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/webhooks'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create webhook:', error);
+    throw error;
+  }
+}
+
