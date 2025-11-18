@@ -16,3 +16,6 @@ async-trait = "0.1"
 dashmap = "6.1"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.48.0", features = ["rt", "rt-multi-thread", "macros"] }

@@ -4,7 +4,7 @@
 
 use crate::database::DatabasePool;
 use crate::events::database::load_event_subscriptions;
-use crate::events::subscriber::{DatabaseEventSubscription, EventSubscriber, RuntimeEventSubscription};
+use crate::events::subscriber::{DatabaseEventSubscription, EventSubscriber};
 use crate::events::types::Event;
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -40,6 +40,7 @@ impl EventDispatcher {
         debug!("Loading event subscriptions from database");
 
         let subscriptions = load_event_subscriptions(pool).await?;
+        let total_count = subscriptions.len();
 
         // Clear existing subscriptions
         self.database_subscriptions.clear();
@@ -58,7 +59,7 @@ impl EventDispatcher {
 
         debug!(
             "Loaded {} event subscriptions for {} events",
-            subscriptions.len(),
+            total_count,
             self.database_subscriptions.len()
         );
 
@@ -197,7 +198,7 @@ impl Default for EventDispatcher {
 /// (webhooks, Kafka, etc.) in the future.
 async fn handle_database_subscription(
     subscription: &DatabaseEventSubscription,
-    event: &Event,
+    _event: &Event,
 ) -> Result<(), EventDispatcherError> {
     match subscription.subscriber_type.as_str() {
         "webhook" => {

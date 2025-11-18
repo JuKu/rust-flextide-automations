@@ -2,7 +2,7 @@
 //!
 //! Defines the interface for event subscribers and subscriber types.
 
-use crate::events::types::{Event, EventPayload};
+use crate::events::types::Event;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;

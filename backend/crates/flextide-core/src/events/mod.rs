@@ -11,6 +11,9 @@ mod dispatcher;
 mod subscriber;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use dispatcher::{EventDispatcher, EventDispatcherError};
 pub use subscriber::{EventSubscriber, EventSubscriberType};
 pub use types::{Event, EventPayload};
