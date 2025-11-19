@@ -3,7 +3,7 @@
 use crate::credentials::credentials::CredentialsManager;
 use crate::credentials::error::CredentialsError;
 use crate::database::DatabasePool;
-use crate::user::database::{user_belongs_to_organization, user_has_permission};
+use crate::user::{user_belongs_to_organization, user_has_permission};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Row;
@@ -851,5 +851,738 @@ pub async fn delete_credential(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::create_test_pool;
+    use hex;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    /// Set up test database with required tables
+    async fn setup_test_db() -> DatabasePool {
+        let pool = create_test_pool().await.expect("Failed to create test pool");
+
+        // Create users table
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS users (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL UNIQUE,
+                        password_hash TEXT NOT NULL,
+                        salt VARCHAR(255),
+                        prename VARCHAR(255) NOT NULL,
+                        lastname VARCHAR(255),
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        mail_verified INTEGER NOT NULL DEFAULT 0,
+                        activated INTEGER NOT NULL DEFAULT 1
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create users table");
+
+                // Create organizations table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS organizations (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        owner_user_id CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create organizations table");
+
+                // Create organization_members table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS organization_members (
+                        org_id CHAR(36) NOT NULL,
+                        user_id CHAR(36) NOT NULL,
+                        role VARCHAR(20) NOT NULL DEFAULT 'member',
+                        joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (org_id, user_id)
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create organization_members table");
+
+                // Create permission_groups table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS permission_groups (
+                        id CHAR(36) NOT NULL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL UNIQUE,
+                        title VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        visible INTEGER NOT NULL DEFAULT 1,
+                        sort_order INTEGER NOT NULL DEFAULT 0
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create permission_groups table");
+
+                // Create permissions table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS permissions (
+                        id CHAR(36) NOT NULL PRIMARY KEY,
+                        permission_group_name VARCHAR(255) NOT NULL,
+                        name VARCHAR(255) NOT NULL UNIQUE,
+                        title VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        visible INTEGER NOT NULL DEFAULT 1,
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (permission_group_name) REFERENCES permission_groups(name) ON DELETE RESTRICT
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create permissions table");
+
+                // Create user_permissions table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS user_permissions (
+                        user_id CHAR(36) NOT NULL,
+                        organization_uuid CHAR(36) NOT NULL,
+                        permission_name VARCHAR(255) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (user_id, organization_uuid, permission_name),
+                        FOREIGN KEY (user_id) REFERENCES users(uuid) ON DELETE CASCADE,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+                        FOREIGN KEY (permission_name) REFERENCES permissions(name) ON DELETE CASCADE
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create user_permissions table");
+
+                // Create credentials table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS credentials (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        organization_uuid CHAR(36) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        type VARCHAR(255) NOT NULL,
+                        encrypted_data BLOB NOT NULL,
+                        creator_user_uuid CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NULL,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+                        FOREIGN KEY (creator_user_uuid) REFERENCES users(uuid) ON DELETE RESTRICT
+                    )",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create credentials table");
+
+                // Insert super_admin permission group and permission
+                sqlx::query(
+                    "INSERT OR IGNORE INTO permission_groups (id, name, title, description, visible, sort_order)
+                     VALUES ('00000000-0000-0000-0000-000000000005', 'super_admin', 'Super Admin', 'Super administrator permissions', 1, 0)",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to insert permission group");
+
+                sqlx::query(
+                    "INSERT OR IGNORE INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
+                     VALUES ('00000000-0000-0000-0000-000000000001', 'super_admin', 'super_admin', 'Super Admin', 'Super administrator permission', 1, 0)",
+                )
+                .execute(p)
+                .await
+                .expect("Failed to insert permission");
+
+                // Insert credential permissions
+                for (perm_id, perm_name, perm_title) in [
+                    ("00000000-0000-0000-0000-000000000010", "can_view_credentials", "View Credentials"),
+                    ("00000000-0000-0000-0000-000000000011", "can_create_credentials", "Create Credentials"),
+                    ("00000000-0000-0000-0000-000000000012", "can_edit_credentials", "Edit Credentials"),
+                    ("00000000-0000-0000-0000-000000000013", "can_delete_credentials", "Delete Credentials"),
+                ] {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
+                         VALUES (?1, 'super_admin', ?2, ?3, 'Credential permission', 1, 0)",
+                    )
+                    .bind(perm_id)
+                    .bind(perm_name)
+                    .bind(perm_title)
+                    .execute(p)
+                    .await
+                    .expect("Failed to insert credential permission");
+                }
+            }
+            _ => unreachable!("Test pool should be SQLite"),
+        }
+
+        pool
+    }
+
+    /// Create a test user
+    async fn create_test_user(pool: &DatabasePool, email: &str) -> String {
+        let user_uuid = Uuid::new_v4().to_string();
+        match pool {
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT INTO users (uuid, email, password_hash, prename, mail_verified, activated)
+                     VALUES (?1, ?2, ?3, ?4, 1, 1)",
+                )
+                .bind(&user_uuid)
+                .bind(email)
+                .bind("hashed_password")
+                .bind("Test")
+                .execute(p)
+                .await
+                .expect("Failed to create test user");
+            }
+            _ => unreachable!("Test pool should be SQLite"),
+        }
+        user_uuid
+    }
+
+    /// Create a test organization
+    async fn create_test_organization(pool: &DatabasePool, owner_user_uuid: &str) -> String {
+        let org_uuid = Uuid::new_v4().to_string();
+        match pool {
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT INTO organizations (uuid, name, owner_user_id)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .bind(&org_uuid)
+                .bind("Test Organization")
+                .bind(owner_user_uuid)
+                .execute(p)
+                .await
+                .expect("Failed to create test organization");
+            }
+            _ => unreachable!("Test pool should be SQLite"),
+        }
+        org_uuid
+    }
+
+    /// Add user to organization
+    async fn add_user_to_organization(pool: &DatabasePool, user_uuid: &str, org_uuid: &str) {
+        match pool {
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT INTO organization_members (org_id, user_id, role)
+                     VALUES (?1, ?2, 'member')",
+                )
+                .bind(org_uuid)
+                .bind(user_uuid)
+                .execute(p)
+                .await
+                .expect("Failed to add user to organization");
+            }
+            _ => unreachable!("Test pool should be SQLite"),
+        }
+    }
+
+    /// Grant permission to user
+    async fn grant_permission(pool: &DatabasePool, user_uuid: &str, org_uuid: &str, permission: &str) {
+        match pool {
+            DatabasePool::Sqlite(p) => {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO user_permissions (user_id, organization_uuid, permission_name)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .bind(user_uuid)
+                .bind(org_uuid)
+                .bind(permission)
+                .execute(p)
+                .await
+                .expect("Failed to grant permission");
+            }
+            _ => unreachable!("Test pool should be SQLite"),
+        }
+    }
+
+    fn create_test_manager() -> CredentialsManager {
+        let test_key = hex::encode([0u8; 32]);
+        std::env::set_var("CREDENTIALS_MASTER_KEY", test_key);
+        CredentialsManager::new().unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_create_credential() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+
+        let data = json!({"api_key": "test-key-123"});
+        let credential_uuid = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &data,
+        )
+        .await
+        .unwrap();
+
+        assert!(!credential_uuid.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_credential_user_not_in_org() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        // Don't add user to organization
+
+        let data = json!({"api_key": "test-key-123"});
+        let result = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &data,
+        )
+        .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CredentialsError::UserNotInOrganization => {}
+            _ => panic!("Expected UserNotInOrganization error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_credential_no_permission() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        // Don't grant permission
+
+        let data = json!({"api_key": "test-key-123"});
+        let result = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &data,
+        )
+        .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CredentialsError::PermissionDenied => {}
+            _ => panic!("Expected PermissionDenied error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_credentials() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+
+        // Create some credentials
+        let data1 = json!({"api_key": "key1"});
+        let data2 = json!({"api_key": "key2"});
+        create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Credential 1",
+            "openai",
+            &data1,
+        )
+        .await
+        .unwrap();
+        create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Credential 2",
+            "github",
+            &data2,
+        )
+        .await
+        .unwrap();
+
+        let credentials = list_credentials(&pool, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credentials.len(), 2);
+        assert!(credentials.iter().any(|c| c.name == "Credential 1"));
+        assert!(credentials.iter().any(|c| c.name == "Credential 2"));
+    }
+
+    #[tokio::test]
+    async fn test_list_credentials_empty() {
+        let pool = setup_test_db().await;
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+
+        let credentials = list_credentials(&pool, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credentials.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_credential() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+
+        let original_data = json!({"api_key": "test-key-123", "base_url": "https://api.example.com"});
+        let credential_uuid = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &original_data,
+        )
+        .await
+        .unwrap();
+
+        let credential = get_credential(&pool, &manager, &credential_uuid, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credential.uuid, credential_uuid);
+        assert_eq!(credential.name, "Test Credential");
+        assert_eq!(credential.credential_type, "openai");
+        assert_eq!(credential.data, original_data);
+    }
+
+    #[tokio::test]
+    async fn test_get_credential_not_found() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+
+        let fake_uuid = Uuid::new_v4().to_string();
+        let result = get_credential(&pool, &manager, &fake_uuid, &org_uuid, &user_uuid).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CredentialsError::CredentialNotFound(_) => {}
+            _ => panic!("Expected CredentialNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_credentials_multiple() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+
+        let data1 = json!({"api_key": "key1"});
+        let data2 = json!({"api_key": "key2"});
+        let data3 = json!({"api_key": "key3"});
+
+        let uuid1 = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Credential 1",
+            "openai",
+            &data1,
+        )
+        .await
+        .unwrap();
+        let uuid2 = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Credential 2",
+            "github",
+            &data2,
+        )
+        .await
+        .unwrap();
+        let uuid3 = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Credential 3",
+            "openai",
+            &data3,
+        )
+        .await
+        .unwrap();
+
+        let credentials = get_credentials(
+            &pool,
+            &manager,
+            &[uuid1.clone(), uuid2.clone(), uuid3.clone()],
+            &org_uuid,
+            &user_uuid,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(credentials.len(), 3);
+        assert!(credentials.iter().any(|c| c.uuid == uuid1 && c.data == data1));
+        assert!(credentials.iter().any(|c| c.uuid == uuid2 && c.data == data2));
+        assert!(credentials.iter().any(|c| c.uuid == uuid3 && c.data == data3));
+    }
+
+    #[tokio::test]
+    async fn test_get_credentials_empty_list() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+
+        let credentials = get_credentials(&pool, &manager, &[], &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credentials.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_update_credential() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_edit_credentials").await;
+
+        let original_data = json!({"api_key": "old-key"});
+        let credential_uuid = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &original_data,
+        )
+        .await
+        .unwrap();
+
+        let updated_data = json!({"api_key": "new-key", "base_url": "https://api.example.com"});
+        update_credential(
+            &pool,
+            &manager,
+            &credential_uuid,
+            &org_uuid,
+            &user_uuid,
+            Some("Updated Name"),
+            &updated_data,
+        )
+        .await
+        .unwrap();
+
+        let credential = get_credential(&pool, &manager, &credential_uuid, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credential.name, "Updated Name");
+        assert_eq!(credential.data, updated_data);
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_no_name_change() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_edit_credentials").await;
+
+        let original_data = json!({"api_key": "old-key"});
+        let credential_uuid = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &original_data,
+        )
+        .await
+        .unwrap();
+
+        let updated_data = json!({"api_key": "new-key"});
+        update_credential(
+            &pool,
+            &manager,
+            &credential_uuid,
+            &org_uuid,
+            &user_uuid,
+            None, // Don't change name
+            &updated_data,
+        )
+        .await
+        .unwrap();
+
+        let credential = get_credential(&pool, &manager, &credential_uuid, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        assert_eq!(credential.name, "Test Credential"); // Name unchanged
+        assert_eq!(credential.data, updated_data);
+    }
+
+    #[tokio::test]
+    async fn test_delete_credential() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_delete_credentials").await;
+
+        let data = json!({"api_key": "test-key"});
+        let credential_uuid = create_credential(
+            &pool,
+            &manager,
+            &org_uuid,
+            &user_uuid,
+            "Test Credential",
+            "openai",
+            &data,
+        )
+        .await
+        .unwrap();
+
+        delete_credential(&pool, &credential_uuid, &org_uuid, &user_uuid)
+            .await
+            .unwrap();
+
+        // Verify it's deleted
+        let result = get_credential(&pool, &manager, &credential_uuid, &org_uuid, &user_uuid).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CredentialsError::CredentialNotFound(_) => {}
+            _ => panic!("Expected CredentialNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_credential_not_found() {
+        let pool = setup_test_db().await;
+        let user_uuid = create_test_user(&pool, "test@example.com").await;
+        let org_uuid = create_test_organization(&pool, &user_uuid).await;
+        add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_delete_credentials").await;
+
+        let fake_uuid = Uuid::new_v4().to_string();
+        let result = delete_credential(&pool, &fake_uuid, &org_uuid, &user_uuid).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CredentialsError::CredentialNotFound(_) => {}
+            _ => panic!("Expected CredentialNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_credential_isolation_between_organizations() {
+        let pool = setup_test_db().await;
+        let manager = create_test_manager();
+        
+        // Create two organizations
+        let user1_uuid = create_test_user(&pool, "user1@example.com").await;
+        let user2_uuid = create_test_user(&pool, "user2@example.com").await;
+        let org1_uuid = create_test_organization(&pool, &user1_uuid).await;
+        let org2_uuid = create_test_organization(&pool, &user2_uuid).await;
+        
+        add_user_to_organization(&pool, &user1_uuid, &org1_uuid).await;
+        add_user_to_organization(&pool, &user2_uuid, &org2_uuid).await;
+        grant_permission(&pool, &user1_uuid, &org1_uuid, "can_create_credentials").await;
+        grant_permission(&pool, &user1_uuid, &org1_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user2_uuid, &org2_uuid, "can_create_credentials").await;
+        grant_permission(&pool, &user2_uuid, &org2_uuid, "can_view_credentials").await;
+
+        // Create credential in org1
+        let data1 = json!({"api_key": "org1-key"});
+        let credential1_uuid = create_credential(
+            &pool,
+            &manager,
+            &org1_uuid,
+            &user1_uuid,
+            "Org1 Credential",
+            "openai",
+            &data1,
+        )
+        .await
+        .unwrap();
+
+        // Create credential in org2
+        let data2 = json!({"api_key": "org2-key"});
+        let credential2_uuid = create_credential(
+            &pool,
+            &manager,
+            &org2_uuid,
+            &user2_uuid,
+            "Org2 Credential",
+            "openai",
+            &data2,
+        )
+        .await
+        .unwrap();
+
+        // User1 should only see org1 credentials
+        let org1_credentials = list_credentials(&pool, &org1_uuid, &user1_uuid).await.unwrap();
+        assert_eq!(org1_credentials.len(), 1);
+        assert_eq!(org1_credentials[0].uuid, credential1_uuid);
+
+        // User2 should only see org2 credentials
+        let org2_credentials = list_credentials(&pool, &org2_uuid, &user2_uuid).await.unwrap();
+        assert_eq!(org2_credentials.len(), 1);
+        assert_eq!(org2_credentials[0].uuid, credential2_uuid);
+
+        // User1 cannot access org2 credential
+        let result = get_credential(&pool, &manager, &credential2_uuid, &org1_uuid, &user1_uuid).await;
+        assert!(result.is_err());
+    }
 }
 
