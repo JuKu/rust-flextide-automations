@@ -49,13 +49,31 @@ pnpm add yjs y-websocket @tiptap/extension-collaboration @tiptap/extension-colla
 ```
 
 **Backend Options:**
-- **Hocuspocus** (recommended): Open-source WebSocket backend for Yjs, can be self-hosted
+
+**Node.js/TypeScript Options:**
+- **Hocuspocus**: Open-source WebSocket backend for Yjs, can be self-hosted
   ```bash
   pnpm add @hocuspocus/server @hocuspocus/provider
   ```
 - **y-websocket**: Simple WebSocket provider (requires custom server implementation)
 
-**Basic Setup Example:**
+**Rust Backend Options (Recommended for Rust-only backends):**
+- **yrs-warp**: WebSocket server implementation for Yrs (Rust port of Yjs) using Warp framework
+  - GitHub: https://github.com/y-crdt/yrs-warp
+  - Fully Rust-based, no Node.js required
+  - Compatible with Yjs clients (Tiptap)
+  
+- **Y-CRDT (yrs) + Custom WebSocket**: Build custom WebSocket server using `yrs` crate with `tokio-tungstenite` or `axum`
+  - GitHub: https://github.com/y-crdt/y-crdt
+  - Full control over implementation
+  - Requires implementing Yjs WebSocket protocol
+
+- **Y-Sweet**: Open-source suite built on Yrs, can be deployed as WebAssembly on Cloudflare
+  - Built on Yrs (Rust)
+  - Can be integrated into Rust backends
+  - Supports edge deployment
+
+**Basic Setup Example (Node.js Backend with Hocuspocus):**
 ```typescript
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -71,6 +89,42 @@ const provider = new HocuspocusProvider({
   name: 'document-id',
   document: ydoc,
 });
+
+const editor = useEditor({
+  extensions: [
+    StarterKit.configure({
+      history: false, // Disable default history for collaboration
+    }),
+    Markdown,
+    Collaboration.configure({
+      document: ydoc,
+    }),
+    CollaborationCursor.configure({
+      provider,
+    }),
+  ],
+});
+
+return <EditorContent editor={editor} />;
+```
+
+**Basic Setup Example (Rust Backend with yrs-warp or custom):**
+```typescript
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Markdown from '@tiptap/extension-markdown';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+
+const ydoc = new Y.Doc();
+// Connect to your Rust WebSocket server
+const provider = new WebsocketProvider(
+  'ws://localhost:3030/collaboration', // Your Rust server URL
+  'document-id',
+  ydoc
+);
 
 const editor = useEditor({
   extensions: [
@@ -325,10 +379,12 @@ pnpm add @uiw/react-md-editor
    pnpm add yjs @tiptap/extension-collaboration @tiptap/extension-collaboration-cursor
    ```
 
-3. **Backend (Hocuspocus - Self-Hosted):**
-   ```bash
-   pnpm add @hocuspocus/server @hocuspocus/provider
-   ```
+3. **Backend Options:**
+   - **Node.js (Hocuspocus - Self-Hosted):**
+     ```bash
+     pnpm add @hocuspocus/server @hocuspocus/provider
+     ```
+   - **Rust (yrs-warp or custom):** See Rust Backend Setup section below
 
 4. **UI Extensions (Nice-to-Have):**
    ```bash
@@ -362,6 +418,135 @@ server.listen();
 - Supports authentication
 - Supports persistence
 - Production-ready
+
+### Rust Backend Setup (Alternative to Hocuspocus)
+
+For Rust-only backends, you have several options:
+
+#### Option 1: yrs-warp (Recommended)
+
+**yrs-warp** is a WebSocket server implementation for Yrs (Rust port of Yjs) using the Warp framework.
+
+**Installation:**
+```toml
+# Cargo.toml
+[dependencies]
+yrs = "0.19"
+yrs-warp = "0.1"
+warp = "0.3"
+tokio = { version = "1", features = ["full"] }
+```
+
+**Basic Setup:**
+```rust
+use yrs_warp::YrsWarpServer;
+use warp::Filter;
+
+#[tokio::main]
+async fn main() {
+    let server = YrsWarpServer::new();
+    
+    let routes = warp::path("collaboration")
+        .and(warp::ws())
+        .map(|ws: warp::ws::Ws| {
+            // Handle WebSocket connections
+            ws.on_upgrade(|websocket| {
+                server.handle_connection(websocket)
+            })
+        });
+    
+    warp::serve(routes)
+        .run(([127, 0, 0, 1], 3030))
+        .await;
+}
+```
+
+**Features:**
+- Fully Rust-based
+- Compatible with Yjs clients (Tiptap works seamlessly)
+- Uses Warp (lightweight, fast)
+- Open-source
+
+**GitHub:** https://github.com/y-crdt/yrs-warp
+
+#### Option 2: Custom Implementation with yrs + tokio-tungstenite
+
+Build a custom WebSocket server using `yrs` and `tokio-tungstenite`:
+
+**Installation:**
+```toml
+[dependencies]
+yrs = "0.19"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+**Implementation Overview:**
+1. Create WebSocket server with `tokio-tungstenite`
+2. Use `yrs` to manage Yjs documents
+3. Implement Yjs WebSocket protocol:
+   - Handle sync messages (document updates)
+   - Handle awareness messages (user presence, cursors)
+   - Broadcast updates to all connected clients
+4. Optionally persist documents to database
+
+**Key Components:**
+- Document state management with `yrs::Doc`
+- WebSocket message handling (sync protocol)
+- Awareness protocol for user presence
+- Client connection management
+
+**Resources:**
+- Yjs Protocol: https://github.com/yjs/y-protocols
+- yrs Documentation: https://docs.rs/yrs/
+
+#### Option 3: Y-Sweet
+
+**Y-Sweet** is an open-source suite built on Yrs that can be deployed as WebAssembly on Cloudflare or integrated into Rust backends.
+
+**Features:**
+- Built on Yrs (Rust)
+- Can be integrated into existing Rust applications
+- Supports edge deployment (Cloudflare Workers)
+- Open-source
+
+**GitHub:** https://github.com/y-sweet/y-sweet
+
+#### Frontend Integration with Rust Backend
+
+The frontend setup remains the same - Tiptap with Yjs works with any Yjs-compatible WebSocket server:
+
+```typescript
+import { WebsocketProvider } from 'y-websocket';
+import * as Y from 'yjs';
+
+const ydoc = new Y.Doc();
+const provider = new WebsocketProvider(
+  'ws://localhost:3030/collaboration', // Your Rust WebSocket server
+  'document-id',
+  ydoc
+);
+
+// Use with Tiptap as before
+const editor = useEditor({
+  extensions: [
+    StarterKit,
+    Collaboration.configure({ document: ydoc }),
+    CollaborationCursor.configure({ provider }),
+  ],
+});
+```
+
+**Important Notes:**
+- Yjs WebSocket protocol is language-agnostic
+- Any backend implementing the Yjs protocol will work with Tiptap
+- `yrs` (Rust) and `yjs` (JavaScript) are fully compatible
+- You need to implement:
+  - Document sync protocol
+  - Awareness protocol (for cursors/presence)
+  - Connection management
 
 ### Custom Blocks Implementation
 
@@ -453,14 +638,28 @@ Or configure Tiptap to work with SSR by ensuring proper hydration.
 - **Documentation:** https://docs.yjs.dev
 - **GitHub:** https://github.com/yjs/yjs
 
+### Rust Backend (Yrs)
+- **yrs (Y-CRDT):** https://github.com/y-crdt/y-crdt
+- **yrs-warp:** https://github.com/y-crdt/yrs-warp
+- **yrs Documentation:** https://docs.rs/yrs/
+- **Y-Sweet:** https://github.com/y-sweet/y-sweet
+- **Yjs Protocol Spec:** https://github.com/yjs/y-protocols
+
 ## Conclusion
 
 **Tiptap** is the recommended solution for this project due to:
 - Complete open-source solution (no paid requirements)
 - Full feature set (collaboration, custom blocks, extensibility)
 - Mature ecosystem and documentation
-- Self-hostable collaboration backend
+- Self-hostable collaboration backend (Node.js or Rust)
 - All required and nice-to-have features supported
+- **Rust backend compatible** via yrs/yrs-warp (no Node.js required)
 
-The initial setup effort is justified by the flexibility and capabilities it provides. For a Confluence/Notion-like experience, Tiptap can be configured with custom UI components, slash commands, and floating menus to match the desired UX.
+**For Rust-only backends:**
+- Use **yrs-warp** for a ready-made WebSocket server solution
+- Or implement custom WebSocket server with `yrs` + `tokio-tungstenite`/`axum`
+- Yjs protocol is language-agnostic - any backend implementing it works with Tiptap
+- `yrs` (Rust) and `yjs` (JavaScript) are fully compatible
+
+The initial setup effort is justified by the flexibility and capabilities it provides. For a Confluence/Notion-like experience, Tiptap can be configured with custom UI components, slash commands, and floating menus to match the desired UX. The Rust backend integration via yrs ensures you can maintain a pure Rust stack without requiring Node.js servers.
 

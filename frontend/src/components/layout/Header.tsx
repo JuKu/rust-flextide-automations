@@ -168,23 +168,29 @@ export function Header() {
     loadPermissions();
   }, [currentOrgUuid]);
 
-  // Fetch integrations on mount
+  // Fetch integrations when organization is selected
   useEffect(() => {
-    if (!isAuthenticated()) {
+    if (!currentOrgUuid || !isAuthenticated()) {
       return;
     }
 
     async function fetchIntegrations() {
       try {
+        // Small delay to ensure organization UUID is properly set in sessionStorage
+        // This prevents race conditions during page reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const integrationsList = await getIntegrations();
         setIntegrations(integrationsList);
       } catch (error) {
         console.error("Failed to fetch integrations:", error);
+        // Set empty array on error to prevent menu issues
+        setIntegrations([]);
       }
     }
 
     fetchIntegrations();
-  }, []);
+  }, [currentOrgUuid]);
 
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
