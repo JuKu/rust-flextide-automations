@@ -18,6 +18,8 @@ export function CreateAreaDialog({
   const [shortName, setShortName] = useState("");
   const [description, setDescription] = useState("");
   const [iconName, setIconName] = useState("");
+  const [colorHex, setColorHex] = useState("");
+  const [topics, setTopics] = useState("");
   const [isPublic, setIsPublic] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +43,10 @@ export function CreateAreaDialog({
 
       const request: CreateDocsAreaRequest = {
         short_name: shortName.trim(),
-        ...(description.trim() && { description: description.trim() }),
-        ...(iconName.trim() && { icon_name: iconName.trim() }),
+        ...(description.trim() ? { description: description.trim() } : { description: null }),
+        ...(iconName.trim() ? { icon_name: iconName.trim() } : { icon_name: null }),
+        ...(colorHex.trim() ? { color_hex: colorHex.trim() } : { color_hex: null }),
+        ...(topics.trim() ? { topics: topics.trim() } : { topics: null }),
         public: isPublic,
         visible: true,
         // deletable is set by backend (defaults to true for user-created areas)
@@ -55,6 +59,8 @@ export function CreateAreaDialog({
       setShortName("");
       setDescription("");
       setIconName("");
+      setColorHex("");
+      setTopics("");
       setIsPublic(false);
 
       onSuccess();
@@ -73,6 +79,8 @@ export function CreateAreaDialog({
       setShortName("");
       setDescription("");
       setIconName("");
+      setColorHex("");
+      setTopics("");
       setIsPublic(false);
       setError(null);
       onClose();
@@ -159,6 +167,58 @@ export function CreateAreaDialog({
             />
             <p className="mt-1 text-xs text-flextide-neutral-text-medium">
               Optional icon identifier or emoji for the area
+            </p>
+          </div>
+
+          <div className="mb-4">
+            <label
+              htmlFor="color-hex"
+              className="block text-sm font-medium text-flextide-neutral-text-dark mb-2"
+            >
+              Color (Hex)
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="color-hex"
+                type="text"
+                value={colorHex}
+                onChange={(e) => setColorHex(e.target.value)}
+                placeholder="#FF5733"
+                pattern="^#[0-9A-Fa-f]{6}$"
+                className="flex-1 px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent focus:border-transparent"
+                disabled={loading}
+              />
+              {colorHex && (
+                <div
+                  className="w-12 h-10 border border-flextide-neutral-border rounded-md"
+                  style={{ backgroundColor: colorHex }}
+                  title={colorHex}
+                />
+              )}
+            </div>
+            <p className="mt-1 text-xs text-flextide-neutral-text-medium">
+              Optional hex color code (e.g., #FF5733) for the area
+            </p>
+          </div>
+
+          <div className="mb-4">
+            <label
+              htmlFor="topics"
+              className="block text-sm font-medium text-flextide-neutral-text-dark mb-2"
+            >
+              Topics / Labels
+            </label>
+            <input
+              id="topics"
+              type="text"
+              value={topics}
+              onChange={(e) => setTopics(e.target.value)}
+              placeholder="e.g., AI, Machine Learning, Documentation"
+              className="w-full px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent focus:border-transparent"
+              disabled={loading}
+            />
+            <p className="mt-1 text-xs text-flextide-neutral-text-medium">
+              Optional comma-separated topics or labels for filtering (e.g., "AI, Machine Learning")
             </p>
           </div>
 

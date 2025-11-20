@@ -186,8 +186,15 @@ function AreaCard({ area, onClick, onEdit, onDelete }: AreaCardProps) {
       className={`group relative rounded-lg border bg-flextide-neutral-panel-bg transition-all hover:shadow-md ${
         isSuperAdminAccess
           ? "border-dashed border-flextide-warning"
+          : area.color_hex
+          ? ""
           : "border-flextide-neutral-border"
       }`}
+      style={
+        area.color_hex && !isSuperAdminAccess
+          ? { borderColor: area.color_hex, borderWidth: "2px" }
+          : undefined
+      }
     >
       <div className="absolute right-2 top-2 z-10 flex items-center gap-2">
         {isSuperAdminAccess && (
@@ -274,6 +281,18 @@ function AreaCard({ area, onClick, onEdit, onDelete }: AreaCardProps) {
               <p className="mt-1 line-clamp-2 text-sm text-flextide-neutral-text-medium">
                 {area.description}
               </p>
+            )}
+            {area.topics && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {area.topics.split(",").map((topic, idx) => (
+                  <span
+                    key={idx}
+                    className="rounded bg-flextide-secondary-teal/10 px-2 py-0.5 text-xs text-flextide-secondary-teal"
+                  >
+                    {topic.trim()}
+                  </span>
+                ))}
+              </div>
             )}
             <div className="mt-2 flex items-center gap-2 text-xs text-flextide-neutral-text-medium">
               {area.public && (

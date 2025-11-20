@@ -44,6 +44,8 @@ pub struct DocsArea {
     pub short_name: String,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: bool,
     pub visible: bool,
     pub deletable: bool,
@@ -57,6 +59,8 @@ pub struct CreateDocsAreaRequest {
     pub short_name: String,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: Option<bool>,
     pub visible: Option<bool>,
     pub deletable: Option<bool>,
@@ -68,6 +72,8 @@ pub struct UpdateDocsAreaRequest {
     pub short_name: Option<String>,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: Option<bool>,
     pub visible: Option<bool>,
     pub deletable: Option<bool>,
@@ -198,7 +204,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::MySql(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = ?",
             )
             .bind(area_uuid)
@@ -212,6 +218,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i64, _>("public") != 0,
                     visible: row.get::<i64, _>("visible") != 0,
                     deletable: row.get::<i64, _>("deletable") != 0,
@@ -224,7 +232,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::Postgres(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = $1",
             )
             .bind(area_uuid)
@@ -238,6 +246,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i32, _>("public") != 0,
                     visible: row.get::<i32, _>("visible") != 0,
                     deletable: row.get::<i32, _>("deletable") != 0,
@@ -250,7 +260,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::Sqlite(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = ?1",
             )
             .bind(area_uuid)
@@ -264,6 +274,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i64, _>("public") != 0,
                     visible: row.get::<i64, _>("visible") != 0,
                     deletable: row.get::<i64, _>("deletable") != 0,
@@ -345,14 +357,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -365,14 +379,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -385,14 +401,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -533,6 +551,12 @@ pub async fn update_area(
     if request.icon_name.is_some() {
         update_fields.push("icon_name = ?");
     }
+    if request.color_hex.is_some() {
+        update_fields.push("color_hex = ?");
+    }
+    if request.topics.is_some() {
+        update_fields.push("topics = ?");
+    }
     if request.public.is_some() {
         update_fields.push("public = ?");
     }
@@ -598,6 +622,14 @@ pub async fn update_area(
                 update_fields_pg.push(format!("icon_name = ${}", bind_index));
                 bind_index += 1;
             }
+            if request.color_hex.is_some() {
+                update_fields_pg.push(format!("color_hex = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.topics.is_some() {
+                update_fields_pg.push(format!("topics = ${}", bind_index));
+                bind_index += 1;
+            }
             if request.public.is_some() {
                 update_fields_pg.push(format!("public = ${}", bind_index));
                 bind_index += 1;
@@ -625,6 +657,12 @@ pub async fn update_area(
                 query = query.bind(v);
             }
             if let Some(ref v) = request.icon_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.color_hex {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.topics {
                 query = query.bind(v);
             }
             if let Some(v) = request.public {
@@ -659,6 +697,14 @@ pub async fn update_area(
                 update_fields_sqlite.push(format!("icon_name = ?{}", bind_index));
                 bind_index += 1;
             }
+            if request.color_hex.is_some() {
+                update_fields_sqlite.push(format!("color_hex = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.topics.is_some() {
+                update_fields_sqlite.push(format!("topics = ?{}", bind_index));
+                bind_index += 1;
+            }
             if request.public.is_some() {
                 update_fields_sqlite.push(format!("public = ?{}", bind_index));
                 bind_index += 1;
@@ -686,6 +732,12 @@ pub async fn update_area(
                 query = query.bind(v);
             }
             if let Some(ref v) = request.icon_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.color_hex {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.topics {
                 query = query.bind(v);
             }
             if let Some(v) = request.public {
@@ -932,7 +984,7 @@ pub async fn list_accessible_areas(
             DatabasePool::MySql(p) => {
                 let rows = sqlx::query(
                     "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                     public, visible, deletable, creator_uuid, created_at
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
                      FROM module_docs_areas
                      WHERE organization_uuid = ? AND visible = 1
                      ORDER BY created_at DESC",
@@ -951,6 +1003,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i64, _>("public") != 0,
                                 visible: row.get::<i64, _>("visible") != 0,
                                 deletable: row.get::<i64, _>("deletable") != 0,
@@ -965,7 +1019,7 @@ pub async fn list_accessible_areas(
             DatabasePool::Postgres(p) => {
                 let rows = sqlx::query(
                     "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                     public, visible, deletable, creator_uuid, created_at
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
                      FROM module_docs_areas
                      WHERE organization_uuid = $1 AND visible = 1
                      ORDER BY created_at DESC",
@@ -984,6 +1038,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i32, _>("public") != 0,
                                 visible: row.get::<i32, _>("visible") != 0,
                                 deletable: row.get::<i32, _>("deletable") != 0,
@@ -998,7 +1054,7 @@ pub async fn list_accessible_areas(
             DatabasePool::Sqlite(p) => {
                 let rows = sqlx::query(
                     "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                     public, visible, deletable, creator_uuid, created_at
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
                      FROM module_docs_areas
                      WHERE organization_uuid = ?1 AND visible = 1
                      ORDER BY created_at DESC",
@@ -1017,6 +1073,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i64, _>("public") != 0,
                                 visible: row.get::<i64, _>("visible") != 0,
                                 deletable: row.get::<i64, _>("deletable") != 0,
@@ -1035,7 +1093,7 @@ pub async fn list_accessible_areas(
             DatabasePool::MySql(p) => {
                 let rows = sqlx::query(
                     "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
-                     a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
                      FROM module_docs_areas a
                      LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = ?
                      WHERE a.organization_uuid = ? AND a.visible = 1
@@ -1057,6 +1115,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i64, _>("public") != 0,
                                 visible: row.get::<i64, _>("visible") != 0,
                                 deletable: row.get::<i64, _>("deletable") != 0,
@@ -1071,7 +1131,7 @@ pub async fn list_accessible_areas(
             DatabasePool::Postgres(p) => {
                 let rows = sqlx::query(
                     "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
-                     a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
                      FROM module_docs_areas a
                      LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = $1
                      WHERE a.organization_uuid = $2 AND a.visible = 1
@@ -1093,6 +1153,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i32, _>("public") != 0,
                                 visible: row.get::<i32, _>("visible") != 0,
                                 deletable: row.get::<i32, _>("deletable") != 0,
@@ -1107,7 +1169,7 @@ pub async fn list_accessible_areas(
             DatabasePool::Sqlite(p) => {
                 let rows = sqlx::query(
                     "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
-                     a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
                      FROM module_docs_areas a
                      LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = ?1
                      WHERE a.organization_uuid = ?2 AND a.visible = 1
@@ -1129,6 +1191,8 @@ pub async fn list_accessible_areas(
                                 short_name: row.get("short_name"),
                                 description: row.get("description"),
                                 icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
                                 public: row.get::<i64, _>("public") != 0,
                                 visible: row.get::<i64, _>("visible") != 0,
                                 deletable: row.get::<i64, _>("deletable") != 0,

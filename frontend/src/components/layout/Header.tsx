@@ -69,6 +69,7 @@ const baseMenuItems: MenuItem[] = [
     children: [
       { label: "Users", href: "/admin/users" },
       { label: "Worker Nodes", href: "/admin/worker-nodes" },
+      { label: "Backup", href: "/admin/backup" },
     ],
   },
 ];
@@ -197,6 +198,14 @@ export function Header() {
   // Build menu items with dynamic integrations
   const menuItems: MenuItem[] = (() => {
     const items = [...baseMenuItems];
+    
+    // Filter out Admin menu if user is not server admin
+    if (!isServerAdmin()) {
+      const adminIndex = items.findIndex(item => item.label === "Admin");
+      if (adminIndex !== -1) {
+        items.splice(adminIndex, 1);
+      }
+    }
     
     // Find Services index and insert Integrations after it
     const servicesIndex = items.findIndex(item => item.label === "Services");
