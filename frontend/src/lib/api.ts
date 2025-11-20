@@ -1456,3 +1456,619 @@ export async function deleteWebhook(webhookId: string): Promise<{ message: strin
   }
 }
 
+// ============================================================================
+// Docs Module API
+// ============================================================================
+
+export interface DocsArea {
+  uuid: string;
+  organization_uuid: string;
+  short_name: string;
+  description: string | null;
+  icon_name: string | null;
+  color_hex: string | null;
+  topics: string | null;
+  public: boolean;
+  visible: boolean;
+  deletable: boolean;
+  creator_uuid: string;
+  created_at: string;
+}
+
+export interface DocsAreaWithMembership extends DocsArea {
+  is_member: boolean;
+}
+
+export interface DocsActivity {
+  id: string;
+  type: 'page_created' | 'page_updated' | 'page_deleted' | 'area_created' | 'area_updated';
+  user_name: string;
+  user_uuid: string;
+  page_title?: string;
+  page_uuid?: string;
+  area_name?: string;
+  area_uuid?: string;
+  timestamp: string;
+}
+
+export interface CreateDocsAreaRequest {
+  short_name: string;
+  description?: string;
+  icon_name?: string;
+  public?: boolean;
+  visible?: boolean;
+  // deletable is not user-editable - it's a system flag for system-created areas
+}
+
+export interface CreateDocsAreaRequest {
+  short_name: string;
+  description?: string | null;
+  icon_name?: string | null;
+  color_hex?: string | null;
+  topics?: string | null;
+  public?: boolean;
+  visible?: boolean;
+  // deletable is not user-editable - it's a system flag for system-created areas
+}
+
+export interface UpdateDocsAreaRequest {
+  short_name?: string;
+  description?: string | null;
+  icon_name?: string | null;
+  color_hex?: string | null;
+  topics?: string | null;
+  public?: boolean;
+  visible?: boolean;
+  // deletable is not user-editable - it's a system flag for system-created areas
+}
+
+/**
+ * List all accessible areas for the current user
+ */
+export async function listDocsAreas(): Promise<{ areas: DocsAreaWithMembership[] }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/areas'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/docs/areas'),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list docs areas:', error);
+    throw error;
+  }
+}
+
+/**
+ * List activity feed
+ */
+export async function listDocsActivity(): Promise<{ activities: DocsActivity[] }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/activity'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/docs/activity'),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list docs activity:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new docs area
+ */
+export async function createDocsArea(request: CreateDocsAreaRequest): Promise<{ uuid: string; area: DocsArea; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/areas'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/modules/docs/areas'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a docs area by UUID
+ */
+export async function getDocsArea(areaUuid: string): Promise<{ area: DocsArea }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update a docs area
+ */
+export async function updateDocsArea(areaUuid: string, request: UpdateDocsAreaRequest): Promise<{ area: DocsArea; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a docs area
+ */
+export async function deleteDocsArea(areaUuid: string): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete docs area:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// BACKUP API
+// ============================================================================
+
+export interface Backup {
+  uuid: string;
+  filename: string;
+  full_path: string;
+  creator_user_uuid: string;
+  target_location: string;
+  backup_status: 'COMPLETED' | 'FAILED' | 'IN_PROGRESS' | 'CANCELLED';
+  backup_hash_checksum?: string;
+  is_encrypted: boolean;
+  encryption_algorithm?: string;
+  encryption_master_key_name?: string;
+  start_timestamp?: string;
+  created_at: string;
+  file_exists?: boolean;
+}
+
+export interface BackupJob {
+  uuid: string;
+  job_type: string;
+  job_title: string;
+  json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active: boolean;
+  last_execution_timestamp?: string;
+  next_execution_timestamp?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupStatistics {
+  total_backups: number;
+  last_backup_timestamp?: string;
+  backup_path: string;
+  next_planned_backup?: {
+    uuid: string;
+    job_type: string;
+    job_title: string;
+    last_execution_timestamp?: string;
+  };
+}
+
+export interface PaginatedBackups {
+  backups: Backup[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface CreateBackupRequest {
+  filename: string;
+  target_location?: string;
+}
+
+export interface CreateBackupJobRequest {
+  job_type: string;
+  job_title: string;
+  json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active?: boolean;
+}
+
+export interface UpdateBackupJobRequest {
+  job_title?: string;
+  json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active?: boolean;
+}
+
+export async function getBackupStatistics(): Promise<BackupStatistics> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/admin/backups/statistics'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/admin/backups/statistics'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get backup statistics' }));
+      throw new Error(error.error || 'Failed to get backup statistics');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to get backup statistics:', error);
+    throw error;
+  }
+}
+
+export async function listBackups(page: number = 1, limit: number = 30): Promise<PaginatedBackups> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backups?page=${page}&limit=${limit}`), {
+      method: 'GET',
+      headers: getApiHeaders('/api/admin/backups'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list backups' }));
+      throw new Error(error.error || 'Failed to list backups');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to list backups:', error);
+    throw error;
+  }
+}
+
+export async function createBackup(request: CreateBackupRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/admin/backups'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/admin/backups'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create backup' }));
+      throw new Error(error.error || 'Failed to create backup');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to create backup:', error);
+    throw error;
+  }
+}
+
+export async function deleteBackup(uuid: string): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backups/${uuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/admin/backups/${uuid}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to delete backup' }));
+      throw new Error(error.error || 'Failed to delete backup');
+    }
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to delete backup:', error);
+    throw error;
+  }
+}
+
+export async function restoreBackup(uuid: string): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backups/${uuid}/restore`), {
+      method: 'POST',
+      headers: getApiHeaders(`/api/admin/backups/${uuid}/restore`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to restore backup' }));
+      throw new Error(error.error || 'Failed to restore backup');
+    }
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to restore backup:', error);
+    throw error;
+  }
+}
+
+export async function downloadBackup(uuid: string): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backups/${uuid}/download`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/admin/backups/${uuid}/download`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to download backup' }));
+      throw new Error(error.error || 'Failed to download backup');
+    }
+
+    // Get filename from Content-Disposition header or use default
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = `backup_${uuid}.json.bkp`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+    }
+
+    // Create blob from response
+    const blob = await response.blob();
+    
+    // Create download link and trigger download
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to download backup:', error);
+    throw error;
+  }
+}
+
+export async function listBackupJobs(): Promise<BackupJob[]> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/admin/backup-jobs'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/admin/backup-jobs'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list backup jobs' }));
+      throw new Error(error.error || 'Failed to list backup jobs');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to list backup jobs:', error);
+    throw error;
+  }
+}
+
+export async function getBackupJob(uuid: string): Promise<BackupJob> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backup-jobs/${uuid}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/admin/backup-jobs/${uuid}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get backup job' }));
+      throw new Error(error.error || 'Failed to get backup job');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to get backup job:', error);
+    throw error;
+  }
+}
+
+export async function createBackupJob(request: CreateBackupJobRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/admin/backup-jobs'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/admin/backup-jobs'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create backup job' }));
+      throw new Error(error.error || 'Failed to create backup job');
+    }
+
+    return await response.json();
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to create backup job:', error);
+    throw error;
+  }
+}
+
+export async function updateBackupJob(uuid: string, request: UpdateBackupJobRequest): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backup-jobs/${uuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/admin/backup-jobs/${uuid}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update backup job' }));
+      throw new Error(error.error || 'Failed to update backup job');
+    }
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to update backup job:', error);
+    throw error;
+  }
+}
+
+export async function deleteBackupJob(uuid: string): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backup-jobs/${uuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/admin/backup-jobs/${uuid}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to delete backup job' }));
+      throw new Error(error.error || 'Failed to delete backup job');
+    }
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to delete backup job:', error);
+    throw error;
+  }
+}
+
+export async function executeBackupJob(uuid: string): Promise<void> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/admin/backup-jobs/${uuid}/execute`), {
+      method: 'POST',
+      headers: getApiHeaders(`/api/admin/backup-jobs/${uuid}/execute`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to execute backup job' }));
+      throw new Error(error.error || 'Failed to execute backup job');
+    }
+  } catch (error) {
+    handleNetworkError(error);
+    console.error('Failed to execute backup job:', error);
+    throw error;
+  }
+}
+

@@ -69,6 +69,7 @@ const baseMenuItems: MenuItem[] = [
     children: [
       { label: "Users", href: "/admin/users" },
       { label: "Worker Nodes", href: "/admin/worker-nodes" },
+      { label: "Backup", href: "/admin/backup" },
     ],
   },
 ];
@@ -91,6 +92,12 @@ export function Header() {
   const initializedRef = useRef(false);
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Track when component is mounted (client-side only)
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Get user initial on client side only
   useEffect(() => {
@@ -168,51 +175,69 @@ export function Header() {
     loadPermissions();
   }, [currentOrgUuid]);
 
-  // Fetch integrations on mount
+  // Fetch integrations when organization is selected
   useEffect(() => {
-    if (!isAuthenticated()) {
+    if (!currentOrgUuid || !isAuthenticated()) {
       return;
     }
 
     async function fetchIntegrations() {
       try {
+        // Small delay to ensure organization UUID is properly set in sessionStorage
+        // This prevents race conditions during page reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const integrationsList = await getIntegrations();
         setIntegrations(integrationsList);
       } catch (error) {
         console.error("Failed to fetch integrations:", error);
+        // Set empty array on error to prevent menu issues
+        setIntegrations([]);
       }
     }
 
     fetchIntegrations();
-  }, []);
+  }, [currentOrgUuid]);
 
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
   // Build menu items with dynamic integrations
+  // Only compute dynamic parts after mount to avoid hydration mismatch
   const menuItems: MenuItem[] = (() => {
     const items = [...baseMenuItems];
     
-    // Find Services index and insert Integrations after it
-    const servicesIndex = items.findIndex(item => item.label === "Services");
-    if (servicesIndex !== -1) {
-      // Build integrations menu children
-      const integrationChildren: MenuItem[] = integrations.map(integration => ({
-        label: integration.name,
-        href: integration.route,
-      }));
-      
-      // Add "Add new integration" as last entry
-      integrationChildren.push({
-        label: "Add new integration",
-        href: "/integrations/new",
-      });
+    // Only filter Admin menu on client side after mount
+    if (isMounted && !isServerAdmin()) {
+      const adminIndex = items.findIndex(item => item.label === "Admin");
+      if (adminIndex !== -1) {
+        items.splice(adminIndex, 1);
+      }
+    }
+    
+    // Only add integrations menu on client side after mount
+    if (isMounted) {
+      // Find Services index and insert Integrations after it
+      const servicesIndex = items.findIndex(item => item.label === "Services");
+      if (servicesIndex !== -1) {
+        // Build integrations menu children
+        const integrationChildren: MenuItem[] = integrations.map(integration => ({
+          label: integration.name,
+          href: integration.route,
+        }));
+        
+        // Add "Add new integration" as last entry
+        integrationChildren.push({
+          label: "Add new integration",
+          href: "/integrations/new",
+        });
 
-      // Insert Integrations menu after Services
-      items.splice(servicesIndex + 1, 0, {
-        label: "Integrations",
-        href: "/integrations",
-        children: integrationChildren,
-      });
+        // Insert Integrations menu after Services
+        items.splice(servicesIndex + 1, 0, {
+          label: "Integrations",
+          href: "/integrations",
+          children: integrationChildren,
+        });
+      }
     }
     
     return items;

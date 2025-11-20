@@ -57,6 +57,23 @@ pub enum DatabaseError {
     MigrationFailed(#[from] sqlx::migrate::MigrateError),
 }
 
+impl From<crate::user::UserDatabaseError> for DatabaseError {
+    fn from(err: crate::user::UserDatabaseError) -> Self {
+        match err {
+            crate::user::UserDatabaseError::Database(e) => e,
+            crate::user::UserDatabaseError::Sql(e) => DatabaseError::PoolCreationFailed(e),
+            crate::user::UserDatabaseError::UserCreation(e) => {
+                // Convert UserCreationError to a database error
+                // Since UserCreationError can't be directly converted, we wrap it in PoolCreationFailed
+                // with a formatted message
+                DatabaseError::PoolCreationFailed(sqlx::Error::Configuration(
+                    format!("User creation error: {}", e).into(),
+                ))
+            }
+        }
+    }
+}
+
 /// Database type detected from connection URL
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseType {

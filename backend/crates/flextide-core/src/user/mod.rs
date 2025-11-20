@@ -8,7 +8,7 @@ mod validation;
 
 pub use database::{
     ensure_default_admin_user, get_user_by_email, has_any_users, user_belongs_to_organization,
-    user_has_permission, UserDatabaseError,
+    user_exists_by_uuid, user_has_permission, UserDatabaseError,
 };
 pub use password::{hash_password, verify_password, PasswordError};
 pub use validation::{validate_password, validate_email, PasswordValidationError, EmailValidationError};

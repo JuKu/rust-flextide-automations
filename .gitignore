@@ -174,3 +174,4 @@ backend/migrations/.sqlx/
 
 docs/*RESEARCH.md
 docs/research/*Core_API.md
+backend/backups/*

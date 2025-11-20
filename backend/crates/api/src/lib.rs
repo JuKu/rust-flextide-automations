@@ -28,6 +28,17 @@ pub struct AppState {
 // Re-export Claims from flextide-core for convenience
 pub use flextide_core::jwt::Claims;
 
+mod backup;
+
+// Export helper functions for use in other modules
+pub fn default_page() -> u32 {
+    1
+}
+
+pub fn default_limit() -> u32 {
+    30
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
@@ -336,7 +347,9 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/integrations/search", get(search_integrations))
         .route("/api/webhooks", get(list_webhooks).post(create_webhook))
         .route("/api/webhooks/{id}", get(get_webhook).put(update_webhook).delete(delete_webhook))
+        .nest("/api", backup::create_router())
         .nest("/api", flextide_modules_crm::create_router())
+        .nest("/api", flextide_modules_docs::create_router())
         .layer(
             ServiceBuilder::new()
                 .layer(cors)
@@ -958,18 +971,10 @@ pub async fn get_permissions(
 
 #[derive(Debug, Deserialize)]
 pub struct LastExecutionsQuery {
-    #[serde(default = "default_page")]
+    #[serde(default = "crate::default_page")]
     pub page: u32,
-    #[serde(default = "default_limit")]
+    #[serde(default = "crate::default_limit")]
     pub limit: u32,
-}
-
-fn default_page() -> u32 {
-    1
-}
-
-fn default_limit() -> u32 {
-    30
 }
 
 /// Helper function to extract execution data from a database row

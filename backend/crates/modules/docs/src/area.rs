@@ -44,6 +44,8 @@ pub struct DocsArea {
     pub short_name: String,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: bool,
     pub visible: bool,
     pub deletable: bool,
@@ -57,6 +59,8 @@ pub struct CreateDocsAreaRequest {
     pub short_name: String,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: Option<bool>,
     pub visible: Option<bool>,
     pub deletable: Option<bool>,
@@ -68,6 +72,8 @@ pub struct UpdateDocsAreaRequest {
     pub short_name: Option<String>,
     pub description: Option<String>,
     pub icon_name: Option<String>,
+    pub color_hex: Option<String>,
+    pub topics: Option<String>,
     pub public: Option<bool>,
     pub visible: Option<bool>,
     pub deletable: Option<bool>,
@@ -198,7 +204,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::MySql(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = ?",
             )
             .bind(area_uuid)
@@ -212,6 +218,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i64, _>("public") != 0,
                     visible: row.get::<i64, _>("visible") != 0,
                     deletable: row.get::<i64, _>("deletable") != 0,
@@ -224,7 +232,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::Postgres(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = $1",
             )
             .bind(area_uuid)
@@ -238,6 +246,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i32, _>("public") != 0,
                     visible: row.get::<i32, _>("visible") != 0,
                     deletable: row.get::<i32, _>("deletable") != 0,
@@ -250,7 +260,7 @@ pub async fn load_area_by_uuid(
         DatabasePool::Sqlite(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, short_name, description, icon_name,
-                 public, visible, deletable, creator_uuid, created_at
+                 color_hex, topics, public, visible, deletable, creator_uuid, created_at
                  FROM module_docs_areas WHERE uuid = ?1",
             )
             .bind(area_uuid)
@@ -264,6 +274,8 @@ pub async fn load_area_by_uuid(
                     short_name: row.get("short_name"),
                     description: row.get("description"),
                     icon_name: row.get("icon_name"),
+                    color_hex: row.get("color_hex"),
+                    topics: row.get("topics"),
                     public: row.get::<i64, _>("public") != 0,
                     visible: row.get::<i64, _>("visible") != 0,
                     deletable: row.get::<i64, _>("deletable") != 0,
@@ -310,7 +322,7 @@ pub async fn create_area(
         .await
         .map_err(|e| {
             tracing::error!("Database error checking organization membership: {}", e);
-            DocsAreaDatabaseError::Database(e)
+            DocsAreaDatabaseError::Database(e.into())
         })?;
 
     if !belongs {
@@ -327,7 +339,7 @@ pub async fn create_area(
     .await
     .map_err(|e| {
         tracing::error!("Database error checking permission: {}", e);
-        DocsAreaDatabaseError::Database(e)
+        DocsAreaDatabaseError::Database(e.into())
     })?;
 
     if !has_permission {
@@ -345,14 +357,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -365,14 +379,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -385,14 +401,16 @@ pub async fn create_area(
             sqlx::query(
                 "INSERT INTO module_docs_areas
                  (uuid, organization_uuid, short_name, description, icon_name,
-                  public, visible, deletable, creator_uuid, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                  color_hex, topics, public, visible, deletable, creator_uuid, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )
             .bind(&area_uuid)
             .bind(organization_uuid)
             .bind(&request.short_name)
             .bind(&request.description)
             .bind(&request.icon_name)
+            .bind(&request.color_hex)
+            .bind(&request.topics)
             .bind(public)
             .bind(visible)
             .bind(deletable)
@@ -459,7 +477,7 @@ pub async fn update_area(
         .await
         .map_err(|e| {
             tracing::error!("Database error checking organization membership: {}", e);
-            DocsAreaDatabaseError::Database(e)
+            DocsAreaDatabaseError::Database(e.into())
         })?;
 
     if !belongs {
@@ -483,7 +501,7 @@ pub async fn update_area(
     .await
     .map_err(|e| {
         tracing::error!("Database error checking permission: {}", e);
-        DocsAreaDatabaseError::Database(e)
+        DocsAreaDatabaseError::Database(e.into())
     })?;
 
     let has_edit_own = user_has_permission(
@@ -495,7 +513,7 @@ pub async fn update_area(
     .await
     .map_err(|e| {
         tracing::error!("Database error checking permission: {}", e);
-        DocsAreaDatabaseError::Database(e)
+        DocsAreaDatabaseError::Database(e.into())
     })?;
 
     let is_creator = area.creator_uuid == user_uuid;
@@ -532,6 +550,12 @@ pub async fn update_area(
     }
     if request.icon_name.is_some() {
         update_fields.push("icon_name = ?");
+    }
+    if request.color_hex.is_some() {
+        update_fields.push("color_hex = ?");
+    }
+    if request.topics.is_some() {
+        update_fields.push("topics = ?");
     }
     if request.public.is_some() {
         update_fields.push("public = ?");
@@ -598,6 +622,14 @@ pub async fn update_area(
                 update_fields_pg.push(format!("icon_name = ${}", bind_index));
                 bind_index += 1;
             }
+            if request.color_hex.is_some() {
+                update_fields_pg.push(format!("color_hex = ${}", bind_index));
+                bind_index += 1;
+            }
+            if request.topics.is_some() {
+                update_fields_pg.push(format!("topics = ${}", bind_index));
+                bind_index += 1;
+            }
             if request.public.is_some() {
                 update_fields_pg.push(format!("public = ${}", bind_index));
                 bind_index += 1;
@@ -625,6 +657,12 @@ pub async fn update_area(
                 query = query.bind(v);
             }
             if let Some(ref v) = request.icon_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.color_hex {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.topics {
                 query = query.bind(v);
             }
             if let Some(v) = request.public {
@@ -659,6 +697,14 @@ pub async fn update_area(
                 update_fields_sqlite.push(format!("icon_name = ?{}", bind_index));
                 bind_index += 1;
             }
+            if request.color_hex.is_some() {
+                update_fields_sqlite.push(format!("color_hex = ?{}", bind_index));
+                bind_index += 1;
+            }
+            if request.topics.is_some() {
+                update_fields_sqlite.push(format!("topics = ?{}", bind_index));
+                bind_index += 1;
+            }
             if request.public.is_some() {
                 update_fields_sqlite.push(format!("public = ?{}", bind_index));
                 bind_index += 1;
@@ -686,6 +732,12 @@ pub async fn update_area(
                 query = query.bind(v);
             }
             if let Some(ref v) = request.icon_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.color_hex {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.topics {
                 query = query.bind(v);
             }
             if let Some(v) = request.public {
@@ -761,7 +813,7 @@ pub async fn delete_area(
         .await
         .map_err(|e| {
             tracing::error!("Database error checking organization membership: {}", e);
-            DocsAreaDatabaseError::Database(e)
+            DocsAreaDatabaseError::Database(e.into())
         })?;
 
     if !belongs {
@@ -790,7 +842,7 @@ pub async fn delete_area(
     .await
     .map_err(|e| {
         tracing::error!("Database error checking permission: {}", e);
-        DocsAreaDatabaseError::Database(e)
+        DocsAreaDatabaseError::Database(e.into())
     })?;
 
     let has_delete_own = user_has_permission(
@@ -802,7 +854,7 @@ pub async fn delete_area(
     .await
     .map_err(|e| {
         tracing::error!("Database error checking permission: {}", e);
-        DocsAreaDatabaseError::Database(e)
+        DocsAreaDatabaseError::Database(e.into())
     })?;
 
     let is_creator = area.creator_uuid == user_uuid;
@@ -880,5 +932,326 @@ pub async fn delete_area(
     }
 
     Ok(())
+}
+
+/// Area with membership information for listing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocsAreaWithMembership {
+    #[serde(flatten)]
+    pub area: DocsArea,
+    /// Whether the user is a direct member of this area
+    pub is_member: bool,
+}
+
+/// List all areas accessible to a user in an organization
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `user_uuid` - UUID of the user
+///
+/// # Returns
+/// Returns a list of areas the user can access. If the user has super_admin permission,
+/// returns all areas in the organization. Otherwise, returns only areas where:
+/// - The area is public, OR
+/// - The user is a member of the area
+///
+/// Each area includes an `is_member` flag indicating if the user is a direct member.
+///
+/// # Errors
+/// Returns `DocsAreaDatabaseError` if database operation fails
+pub async fn list_accessible_areas(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    user_uuid: &str,
+) -> Result<Vec<DocsAreaWithMembership>, DocsAreaDatabaseError> {
+    // Check if user has super_admin permission
+    let has_super_admin = user_has_permission(
+        pool,
+        user_uuid,
+        organization_uuid,
+        "super_admin",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking super_admin permission: {}", e);
+        DocsAreaDatabaseError::Database(e.into())
+    })?;
+
+    let areas = if has_super_admin {
+        // Super admin can see all areas in the organization
+        match pool {
+            DatabasePool::MySql(p) => {
+                let rows = sqlx::query(
+                    "SELECT uuid, organization_uuid, short_name, description, icon_name,
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
+                     FROM module_docs_areas
+                     WHERE organization_uuid = ? AND visible = 1
+                     ORDER BY created_at DESC",
+                )
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i64, _>("public") != 0,
+                                visible: row.get::<i64, _>("visible") != 0,
+                                deletable: row.get::<i64, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+            DatabasePool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT uuid, organization_uuid, short_name, description, icon_name,
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
+                     FROM module_docs_areas
+                     WHERE organization_uuid = $1 AND visible = 1
+                     ORDER BY created_at DESC",
+                )
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i32, _>("public") != 0,
+                                visible: row.get::<i32, _>("visible") != 0,
+                                deletable: row.get::<i32, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+            DatabasePool::Sqlite(p) => {
+                let rows = sqlx::query(
+                    "SELECT uuid, organization_uuid, short_name, description, icon_name,
+                     color_hex, topics, public, visible, deletable, creator_uuid, created_at
+                     FROM module_docs_areas
+                     WHERE organization_uuid = ?1 AND visible = 1
+                     ORDER BY created_at DESC",
+                )
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i64, _>("public") != 0,
+                                visible: row.get::<i64, _>("visible") != 0,
+                                deletable: row.get::<i64, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+        }
+    } else {
+        // Regular user: only areas they're a member of or public areas
+        match pool {
+            DatabasePool::MySql(p) => {
+                let rows = sqlx::query(
+                    "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     FROM module_docs_areas a
+                     LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = ?
+                     WHERE a.organization_uuid = ? AND a.visible = 1
+                     AND (a.public = 1 OR m.user_uuid IS NOT NULL)
+                     ORDER BY a.created_at DESC",
+                )
+                .bind(user_uuid)
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i64, _>("public") != 0,
+                                visible: row.get::<i64, _>("visible") != 0,
+                                deletable: row.get::<i64, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+            DatabasePool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     FROM module_docs_areas a
+                     LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = $1
+                     WHERE a.organization_uuid = $2 AND a.visible = 1
+                     AND (a.public = 1 OR m.user_uuid IS NOT NULL)
+                     ORDER BY a.created_at DESC",
+                )
+                .bind(user_uuid)
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i32, _>("public") != 0,
+                                visible: row.get::<i32, _>("visible") != 0,
+                                deletable: row.get::<i32, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+            DatabasePool::Sqlite(p) => {
+                let rows = sqlx::query(
+                    "SELECT DISTINCT a.uuid, a.organization_uuid, a.short_name, a.description, a.icon_name,
+                     a.color_hex, a.topics, a.public, a.visible, a.deletable, a.creator_uuid, a.created_at
+                     FROM module_docs_areas a
+                     LEFT JOIN module_docs_area_members m ON a.uuid = m.area_uuid AND m.user_uuid = ?1
+                     WHERE a.organization_uuid = ?2 AND a.visible = 1
+                     AND (a.public = 1 OR m.user_uuid IS NOT NULL)
+                     ORDER BY a.created_at DESC",
+                )
+                .bind(user_uuid)
+                .bind(organization_uuid)
+                .fetch_all(p)
+                .await?;
+
+                rows.into_iter()
+                    .map(|row| {
+                        let area_uuid: String = row.get("uuid");
+                        (
+                            DocsArea {
+                                uuid: area_uuid.clone(),
+                                organization_uuid: row.get("organization_uuid"),
+                                short_name: row.get("short_name"),
+                                description: row.get("description"),
+                                icon_name: row.get("icon_name"),
+                                color_hex: row.get("color_hex"),
+                                topics: row.get("topics"),
+                                public: row.get::<i64, _>("public") != 0,
+                                visible: row.get::<i64, _>("visible") != 0,
+                                deletable: row.get::<i64, _>("deletable") != 0,
+                                creator_uuid: row.get("creator_uuid"),
+                                created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                            },
+                            area_uuid,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+        }
+    };
+
+    // Check membership for each area
+    let mut result = Vec::new();
+    for (area, area_uuid) in areas {
+        let is_member = match pool {
+            DatabasePool::MySql(p) => {
+                let row = sqlx::query(
+                    "SELECT COUNT(*) as count FROM module_docs_area_members
+                     WHERE area_uuid = ? AND user_uuid = ?",
+                )
+                .bind(&area_uuid)
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+                let count: i64 = row.get("count");
+                count > 0
+            }
+            DatabasePool::Postgres(p) => {
+                let row = sqlx::query(
+                    "SELECT COUNT(*) as count FROM module_docs_area_members
+                     WHERE area_uuid = $1 AND user_uuid = $2",
+                )
+                .bind(&area_uuid)
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+                let count: i64 = row.get("count");
+                count > 0
+            }
+            DatabasePool::Sqlite(p) => {
+                let row = sqlx::query(
+                    "SELECT COUNT(*) as count FROM module_docs_area_members
+                     WHERE area_uuid = ?1 AND user_uuid = ?2",
+                )
+                .bind(&area_uuid)
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+                let count: i64 = row.get("count");
+                count > 0
+            }
+        };
+
+        result.push(DocsAreaWithMembership { area, is_member });
+    }
+
+    Ok(result)
 }
 

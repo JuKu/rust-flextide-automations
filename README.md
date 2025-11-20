@@ -109,7 +109,40 @@ cd frontend
 pnpm install
 ```
 
-### 4. Run migrations
+### 4. Configure environment variables
+
+Create a `.env` file in the `backend/` directory based on the `.env.sample` template:
+
+```shell
+cd backend
+cp .env.sample .env
+```
+
+Edit `backend/.env` and configure the following variables:
+
+**Required Environment Variables:**
+
+- `DATABASE_URL` - Database connection string
+  - MySQL: `mysql://USER:PASSWORD@localhost:3306/flextide`
+  - PostgreSQL: `postgres://USER:PASSWORD@localhost:5432/flextide`
+  - SQLite: `sqlite:///path/to/database.db`
+
+- `CREDENTIALS_MASTER_KEY` - Master encryption key for credentials (AES-256, 32 bytes = 64 hex characters)
+  - Generate with: `python -c "import secrets; print(secrets.token_hex(32))"`
+  - Or: `openssl rand -hex 32`
+  - **Important**: Never commit this key to version control. Use different keys for different environments.
+
+**Example `.env` file:**
+
+```env
+# Database
+DATABASE_URL=mysql://user:password@localhost:3306/flextide
+
+# Credentials Master Key (generate a new one for production!)
+CREDENTIALS_MASTER_KEY=your_64_character_hex_key_here
+```
+
+### 5. Run migrations
 
 ```shell
 cd backend
@@ -118,7 +151,7 @@ sqlx migrate run
 
 Note: Migrations are located in `/backend/migrations`.
 
-### 5. Start services
+### 6. Start services
 
 API Backend:
 ```shell
@@ -157,6 +190,28 @@ Profile
 ```shell
 pnpm run dev
 ```
+
+### 7. Debug Logging
+
+To run the API server with debug logging enabled:
+
+**Windows (PowerShell):**
+```powershell
+cd backend
+$env:RUST_LOG="debug"; cargo run --bin api
+```
+
+**Linux/macOS (Bash):**
+```bash
+cd backend
+RUST_LOG=debug cargo run --bin api
+```
+
+You can also set more specific log levels:
+- `RUST_LOG=info` - Info level and above
+- `RUST_LOG=debug` - Debug level and above (includes SQL queries)
+- `RUST_LOG=trace` - Trace level (most verbose)
+- `RUST_LOG=flextide_core::backup=debug` - Debug logs for specific module
 
 ## 🧩 Writing Custom Nodes
 

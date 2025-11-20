@@ -157,6 +157,45 @@ pub async fn user_has_permission(
     }
 }
 
+/// Check if a user exists by UUID
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `user_uuid` - UUID of the user to check
+///
+/// # Returns
+/// Returns `true` if the user exists, `false` otherwise
+///
+/// # Errors
+/// Returns `UserDatabaseError` if the database query fails
+pub async fn user_exists_by_uuid(pool: &DatabasePool, user_uuid: &str) -> Result<bool, UserDatabaseError> {
+    let count: i64 = match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE uuid = ?")
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+            row.get("count")
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE uuid = $1")
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+            row.get("count")
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE uuid = ?1")
+                .bind(user_uuid)
+                .fetch_one(p)
+                .await?;
+            row.get("count")
+        }
+    };
+
+    Ok(count > 0)
+}
+
 /// Get a user by email from the database
 ///
 /// # Errors
