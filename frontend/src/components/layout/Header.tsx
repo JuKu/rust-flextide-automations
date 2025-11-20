@@ -92,6 +92,12 @@ export function Header() {
   const initializedRef = useRef(false);
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Track when component is mounted (client-side only)
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Get user initial on client side only
   useEffect(() => {
@@ -196,38 +202,42 @@ export function Header() {
   const currentOrg = organizations.find((org) => org.uuid === currentOrgUuid);
 
   // Build menu items with dynamic integrations
+  // Only compute dynamic parts after mount to avoid hydration mismatch
   const menuItems: MenuItem[] = (() => {
     const items = [...baseMenuItems];
     
-    // Filter out Admin menu if user is not server admin
-    if (!isServerAdmin()) {
+    // Only filter Admin menu on client side after mount
+    if (isMounted && !isServerAdmin()) {
       const adminIndex = items.findIndex(item => item.label === "Admin");
       if (adminIndex !== -1) {
         items.splice(adminIndex, 1);
       }
     }
     
-    // Find Services index and insert Integrations after it
-    const servicesIndex = items.findIndex(item => item.label === "Services");
-    if (servicesIndex !== -1) {
-      // Build integrations menu children
-      const integrationChildren: MenuItem[] = integrations.map(integration => ({
-        label: integration.name,
-        href: integration.route,
-      }));
-      
-      // Add "Add new integration" as last entry
-      integrationChildren.push({
-        label: "Add new integration",
-        href: "/integrations/new",
-      });
+    // Only add integrations menu on client side after mount
+    if (isMounted) {
+      // Find Services index and insert Integrations after it
+      const servicesIndex = items.findIndex(item => item.label === "Services");
+      if (servicesIndex !== -1) {
+        // Build integrations menu children
+        const integrationChildren: MenuItem[] = integrations.map(integration => ({
+          label: integration.name,
+          href: integration.route,
+        }));
+        
+        // Add "Add new integration" as last entry
+        integrationChildren.push({
+          label: "Add new integration",
+          href: "/integrations/new",
+        });
 
-      // Insert Integrations menu after Services
-      items.splice(servicesIndex + 1, 0, {
-        label: "Integrations",
-        href: "/integrations",
-        children: integrationChildren,
-      });
+        // Insert Integrations menu after Services
+        items.splice(servicesIndex + 1, 0, {
+          label: "Integrations",
+          href: "/integrations",
+          children: integrationChildren,
+        });
+      }
     }
     
     return items;

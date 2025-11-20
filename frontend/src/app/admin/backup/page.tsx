@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import {
   getBackupStatistics,
@@ -10,12 +10,14 @@ import {
   restoreBackup,
   downloadBackup,
   listBackupJobs,
+  createBackupJob,
   deleteBackupJob,
   executeBackupJob,
   type Backup,
   type BackupJob,
   type BackupStatistics,
   type PaginatedBackups,
+  type CreateBackupJobRequest,
 } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { isServerAdmin } from "@/lib/auth";
@@ -31,20 +33,15 @@ export default function BackupPage() {
   const [isDeleteBackupDialogOpen, setIsDeleteBackupDialogOpen] = useState(false);
   const [isRestoreBackupDialogOpen, setIsRestoreBackupDialogOpen] = useState(false);
   const [isDeleteJobDialogOpen, setIsDeleteJobDialogOpen] = useState(false);
+  const [isCreateJobDialogOpen, setIsCreateJobDialogOpen] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<Backup | null>(null);
   const [selectedJob, setSelectedJob] = useState<BackupJob | null>(null);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [isCreatingJob, setIsCreatingJob] = useState(false);
+  const [newJobTitle, setNewJobTitle] = useState("");
+  const [newJobType, setNewJobType] = useState("scheduled");
 
-  useEffect(() => {
-    if (!isServerAdmin()) {
-      setError("Server admin access required");
-      setLoading(false);
-      return;
-    }
-    loadData();
-  }, [currentPage]);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -64,7 +61,16 @@ export default function BackupPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [currentPage, pageSize]);
+
+  useEffect(() => {
+    if (!isServerAdmin()) {
+      setError("Server admin access required");
+      setLoading(false);
+      return;
+    }
+    loadData();
+  }, [loadData]);
 
   const handleCreateBackup = async () => {
     try {
@@ -158,6 +164,33 @@ export default function BackupPage() {
     } catch (err) {
       console.error("Failed to execute backup job:", err);
       showToast(err instanceof Error ? err.message : "Failed to execute backup job", "error");
+    }
+  };
+
+  const handleCreateJob = async () => {
+    if (!newJobTitle.trim() || !newJobType.trim()) {
+      showToast("Please fill in all required fields", "error");
+      return;
+    }
+
+    try {
+      setIsCreatingJob(true);
+      const request: CreateBackupJobRequest = {
+        job_type: newJobType,
+        job_title: newJobTitle.trim(),
+        json_data: undefined,
+      };
+      await createBackupJob(request);
+      showToast("Backup job created successfully", "success");
+      setIsCreateJobDialogOpen(false);
+      setNewJobTitle("");
+      setNewJobType("scheduled");
+      loadData();
+    } catch (err) {
+      console.error("Failed to create backup job:", err);
+      showToast(err instanceof Error ? err.message : "Failed to create backup job", "error");
+    } finally {
+      setIsCreatingJob(false);
     }
   };
 
@@ -309,24 +342,28 @@ export default function BackupPage() {
                         </td>
                         <td className="px-4 py-3 text-sm text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => handleDownloadBackup(backup)}
-                              className="p-1 text-flextide-primary-accent hover:text-flextide-primary transition-colors"
-                              title="Download"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleRestoreBackupClick(backup)}
-                              className="p-1 text-flextide-info hover:text-flextide-primary-accent transition-colors"
-                              title="Restore"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                              </svg>
-                            </button>
+                            {backup.backup_status !== "IN_PROGRESS" && backup.file_exists !== false && (
+                              <>
+                                <button
+                                  onClick={() => handleDownloadBackup(backup)}
+                                  className="p-1 text-flextide-primary-accent hover:text-flextide-primary transition-colors"
+                                  title="Download"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleRestoreBackupClick(backup)}
+                                  className="p-1 text-flextide-info hover:text-flextide-primary-accent transition-colors"
+                                  title="Restore"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
                             <button
                               onClick={() => handleDeleteBackupClick(backup)}
                               className="p-1 text-flextide-error hover:text-flextide-error/80 transition-colors"
@@ -377,8 +414,14 @@ export default function BackupPage() {
 
           {/* Right Column: Backup Jobs Table */}
           <div className="rounded-md border border-flextide-neutral-border bg-flextide-neutral-panel-bg">
-            <div className="border-b border-flextide-neutral-border p-4">
+            <div className="border-b border-flextide-neutral-border p-4 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-flextide-neutral-text-dark">Backup Jobs</h2>
+              <button
+                onClick={() => setIsCreateJobDialogOpen(true)}
+                className="px-4 py-2 bg-flextide-primary text-white rounded-md hover:bg-flextide-primary-accent transition-colors text-sm"
+              >
+                Create Backup Job
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -467,7 +510,7 @@ export default function BackupPage() {
               Delete Backup
             </h3>
             <p className="text-sm text-flextide-neutral-text-medium mb-6">
-              Are you sure you want to delete the backup "{selectedBackup.filename}"? This action cannot be undone.
+              Are you sure you want to delete the backup &quot;{selectedBackup.filename}&quot;? This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -498,7 +541,7 @@ export default function BackupPage() {
               Restore Backup
             </h3>
             <p className="text-sm text-flextide-neutral-text-medium mb-6">
-              Are you sure you want to restore the backup "{selectedBackup.filename}"? This will overwrite the current database.
+              Are you sure you want to restore the backup &quot;{selectedBackup.filename}&quot;? This will overwrite the current database.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -529,7 +572,7 @@ export default function BackupPage() {
               Delete Backup Job
             </h3>
             <p className="text-sm text-flextide-neutral-text-medium mb-6">
-              Are you sure you want to delete the backup job "{selectedJob.job_title}"? This action cannot be undone.
+              Are you sure you want to delete the backup job &quot;{selectedJob.job_title}&quot;? This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -546,6 +589,64 @@ export default function BackupPage() {
                 className="px-4 py-2 text-sm bg-flextide-error text-white rounded hover:bg-flextide-error/80"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Backup Job Dialog */}
+      {isCreateJobDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-flextide-neutral-text-dark mb-4">
+              Create Backup Job
+            </h3>
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-flextide-neutral-text-dark mb-2">
+                  Job Title *
+                </label>
+                <input
+                  type="text"
+                  value={newJobTitle}
+                  onChange={(e) => setNewJobTitle(e.target.value)}
+                  placeholder="e.g., Daily Database Backup"
+                  className="w-full px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-flextide-neutral-text-dark mb-2">
+                  Job Type *
+                </label>
+                <select
+                  value={newJobType}
+                  onChange={(e) => setNewJobType(e.target.value)}
+                  className="w-full px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent"
+                >
+                  <option value="scheduled">Scheduled</option>
+                  <option value="manual">Manual</option>
+                  <option value="on_demand">On Demand</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setIsCreateJobDialogOpen(false);
+                  setNewJobTitle("");
+                  setNewJobType("scheduled");
+                }}
+                className="px-4 py-2 text-sm border border-flextide-neutral-border rounded hover:bg-flextide-neutral-light-bg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateJob}
+                disabled={isCreatingJob}
+                className="px-4 py-2 text-sm bg-flextide-primary text-white rounded hover:bg-flextide-primary-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCreatingJob ? "Creating..." : "Create"}
               </button>
             </div>
           </div>
