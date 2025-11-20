@@ -21,13 +21,62 @@ async fn main() -> anyhow::Result<()> {
     // Run database migrations
     // Try both paths: ./migrations (when running from backend/) and ./backend/migrations (when running from project root)
     tracing::info!("Running database migrations...");
-    let migration_result = db_pool.run_migrations("./migrations").await;
-    let migration_result = if migration_result.is_err() {
-        db_pool.run_migrations("./backend/migrations").await
-    } else {
-        migration_result
-    };
-    migration_result.map_err(|e| anyhow::anyhow!("Failed to run database migrations: {}", e))?;
+    let current_dir = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    tracing::debug!("Current working directory: {:?}", current_dir);
+    
+    // Check which migrations path exists
+    let migrations_paths = vec![
+        ("./migrations", current_dir.join("migrations")),
+        ("./backend/migrations", current_dir.join("backend").join("migrations")),
+    ];
+    
+    let mut found_path: Option<&str> = None;
+    for (path_str, path_buf) in &migrations_paths {
+        if path_buf.exists() && path_buf.is_dir() {
+            tracing::debug!("Found migrations directory at: {:?} (resolved from: {})", path_buf, path_str);
+            found_path = Some(path_str);
+            
+            // List migration files for debugging
+            if let Ok(entries) = std::fs::read_dir(path_buf) {
+                let mut migration_files: Vec<String> = entries
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let file_name = e.file_name();
+                        let name = file_name.to_string_lossy().to_string();
+                        if name.ends_with(".sql") {
+                            Some(name)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                migration_files.sort();
+                tracing::debug!("Found {} migration files: {:?}", migration_files.len(), migration_files);
+            }
+            break;
+        } else {
+            tracing::warn!("Migrations path does not exist: {:?} (resolved from: {})", path_buf, path_str);
+        }
+    }
+    
+    let migrations_path = found_path.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Migrations directory not found. Tried paths: {:?}. Current directory: {:?}",
+            migrations_paths.iter().map(|(s, _)| s).collect::<Vec<_>>(),
+            current_dir
+        )
+    })?;
+    
+    let migration_result = db_pool.run_migrations(migrations_path).await;
+    migration_result.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to run database migrations from path '{}': {}. Current directory: {:?}",
+            migrations_path,
+            e,
+            current_dir
+        )
+    })?;
     tracing::info!("Database migrations completed");
 
     // Ensure default admin user exists

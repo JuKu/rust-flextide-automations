@@ -185,24 +185,110 @@ impl DatabasePool {
     /// # Errors
     /// Returns `DatabaseError` if migration execution fails
     pub async fn run_migrations(&self, migrations_path: &str) -> Result<(), DatabaseError> {
+        let path = std::path::Path::new(migrations_path);
+        
+        // Verify path exists and is a directory
+        if !path.exists() {
+            let error_msg = format!("Migrations directory does not exist: {:?}", path);
+            tracing::error!("{}", error_msg);
+            return Err(DatabaseError::MigrationFailed(
+                sqlx::migrate::MigrateError::from(sqlx::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    error_msg,
+                )))
+            ));
+        }
+        
+        if !path.is_dir() {
+            let error_msg = format!("Migrations path is not a directory: {:?}", path);
+            tracing::error!("{}", error_msg);
+            return Err(DatabaseError::MigrationFailed(
+                sqlx::migrate::MigrateError::from(sqlx::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    error_msg,
+                )))
+            ));
+        }
+        
+        // Try to list migration files for better error messages
+        let migration_files: Vec<String> = match std::fs::read_dir(path) {
+            Ok(entries) => {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let file_name = e.file_name();
+                        let name = file_name.to_string_lossy().to_string();
+                        if name.ends_with(".sql") {
+                            Some(name)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                tracing::warn!("Failed to read migrations directory: {}", e);
+                vec![]
+            }
+        };
+        
+        if !migration_files.is_empty() {
+            tracing::debug!("Found {} migration files in {:?}: {:?}", migration_files.len(), path, migration_files);
+        } else {
+            tracing::warn!("No migration files found in {:?}", path);
+        }
+        
         match self {
             DatabasePool::MySql(pool) => {
-                sqlx::migrate::Migrator::new(std::path::Path::new(migrations_path))
-                    .await?
-                    .run(pool)
-                    .await?;
+                tracing::debug!("Creating migrator for MySQL from path: {:?}", path);
+                let migrator = sqlx::migrate::Migrator::new(path)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to create migrator for MySQL from {:?}: {}", path, e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
+                
+                tracing::debug!("Running MySQL migrations...");
+                migrator.run(pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to run MySQL migrations: {}", e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
             }
             DatabasePool::Postgres(pool) => {
-                sqlx::migrate::Migrator::new(std::path::Path::new(migrations_path))
-                    .await?
-                    .run(pool)
-                    .await?;
+                tracing::debug!("Creating migrator for PostgreSQL from path: {:?}", path);
+                let migrator = sqlx::migrate::Migrator::new(path)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to create migrator for PostgreSQL from {:?}: {}", path, e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
+                
+                tracing::debug!("Running PostgreSQL migrations...");
+                migrator.run(pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to run PostgreSQL migrations: {}", e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
             }
             DatabasePool::Sqlite(pool) => {
-                sqlx::migrate::Migrator::new(std::path::Path::new(migrations_path))
-                    .await?
-                    .run(pool)
-                    .await?;
+                tracing::debug!("Creating migrator for SQLite from path: {:?}", path);
+                let migrator = sqlx::migrate::Migrator::new(path)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to create migrator for SQLite from {:?}: {}", path, e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
+                
+                tracing::debug!("Running SQLite migrations...");
+                migrator.run(pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to run SQLite migrations: {}", e);
+                        DatabaseError::MigrationFailed(e)
+                    })?;
             }
         }
         Ok(())
