@@ -337,6 +337,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/webhooks", get(list_webhooks).post(create_webhook))
         .route("/api/webhooks/{id}", get(get_webhook).put(update_webhook).delete(delete_webhook))
         .nest("/api", flextide_modules_crm::create_router())
+        .nest("/api", flextide_modules_docs::create_router())
         .layer(
             ServiceBuilder::new()
                 .layer(cors)

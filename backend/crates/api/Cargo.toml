@@ -19,3 +19,4 @@ tracing = "0.1"
 uuid = { version = "1.10", features = ["v4", "v5"] }
 flextide-core = { path = "../flextide-core" }
 flextide-modules-crm = { path = "../modules/crm" }
+flextide-modules-docs = { path = "../modules/docs" }

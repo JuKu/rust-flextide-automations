@@ -1456,3 +1456,275 @@ export async function deleteWebhook(webhookId: string): Promise<{ message: strin
   }
 }
 
+// ============================================================================
+// Docs Module API
+// ============================================================================
+
+export interface DocsArea {
+  uuid: string;
+  organization_uuid: string;
+  short_name: string;
+  description: string | null;
+  icon_name: string | null;
+  public: boolean;
+  visible: boolean;
+  deletable: boolean;
+  creator_uuid: string;
+  created_at: string;
+}
+
+export interface DocsAreaWithMembership extends DocsArea {
+  is_member: boolean;
+}
+
+export interface DocsActivity {
+  id: string;
+  type: 'page_created' | 'page_updated' | 'page_deleted' | 'area_created' | 'area_updated';
+  user_name: string;
+  user_uuid: string;
+  page_title?: string;
+  page_uuid?: string;
+  area_name?: string;
+  area_uuid?: string;
+  timestamp: string;
+}
+
+export interface CreateDocsAreaRequest {
+  short_name: string;
+  description?: string;
+  icon_name?: string;
+  public?: boolean;
+  visible?: boolean;
+  // deletable is not user-editable - it's a system flag for system-created areas
+}
+
+export interface UpdateDocsAreaRequest {
+  short_name?: string;
+  description?: string;
+  icon_name?: string;
+  public?: boolean;
+  visible?: boolean;
+  // deletable is not user-editable - it's a system flag for system-created areas
+}
+
+/**
+ * List all accessible areas for the current user
+ */
+export async function listDocsAreas(): Promise<{ areas: DocsAreaWithMembership[] }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/areas'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/docs/areas'),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list docs areas:', error);
+    throw error;
+  }
+}
+
+/**
+ * List activity feed
+ */
+export async function listDocsActivity(): Promise<{ activities: DocsActivity[] }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/activity'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/modules/docs/activity'),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list docs activity:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new docs area
+ */
+export async function createDocsArea(request: CreateDocsAreaRequest): Promise<{ uuid: string; area: DocsArea; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/modules/docs/areas'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/modules/docs/areas'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a docs area by UUID
+ */
+export async function getDocsArea(areaUuid: string): Promise<{ area: DocsArea }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update a docs area
+ */
+export async function updateDocsArea(areaUuid: string, request: UpdateDocsAreaRequest): Promise<{ area: DocsArea; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update docs area:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a docs area
+ */
+export async function deleteDocsArea(areaUuid: string): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete docs area:', error);
+    throw error;
+  }
+}
+

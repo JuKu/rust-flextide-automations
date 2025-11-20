@@ -18,13 +18,11 @@ pub use page::{
 };
 
 use axum::{
-    extract::Extension,
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
-use flextide_core::database::DatabasePool;
 use serde_json::json;
 
 pub fn create_router<S>() -> Router<S>

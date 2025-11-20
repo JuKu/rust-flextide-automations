@@ -16,8 +16,8 @@ use flextide_core::jwt::Claims;
 use serde_json::{json, Value as JsonValue};
 
 use crate::area::{
-    create_area, delete_area, load_area_by_uuid, update_area, CreateDocsAreaRequest,
-    DocsAreaDatabaseError, UpdateDocsAreaRequest,
+    create_area, delete_area, load_area_by_uuid, list_accessible_areas, update_area,
+    CreateDocsAreaRequest, DocsAreaDatabaseError, UpdateDocsAreaRequest,
 };
 use crate::folder::{
     create_folder, delete_folder, list_folders, reorder_folder, update_folder_name,
@@ -33,7 +33,7 @@ where
 {
     Router::new()
         .route("/modules/docs/documents", get(list_documents))
-        .route("/modules/docs/areas", post(create_area_endpoint))
+        .route("/modules/docs/areas", get(list_areas_endpoint).post(create_area_endpoint))
         .route(
             "/modules/docs/areas/{uuid}",
             get(get_area_endpoint)
@@ -49,6 +49,7 @@ where
             "/modules/docs/folders/{uuid}/sort-order",
             put(reorder_folder_endpoint),
         )
+        .route("/modules/docs/activity", get(list_activity_endpoint))
 }
 
 async fn list_documents(
@@ -62,9 +63,102 @@ async fn list_documents(
     })))
 }
 
+/// List all accessible areas for the current user
+///
+/// GET /api/modules/docs/areas
+pub async fn list_areas_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // List accessible areas
+    let areas = list_accessible_areas(&pool, &org_uuid, &claims.user_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error listing areas: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "areas": areas
+    })))
+}
+
+/// List activity feed (mock data for now)
+///
+/// GET /api/modules/docs/activity
+pub async fn list_activity_endpoint(
+    Extension(_pool): Extension<DatabasePool>,
+    Extension(_org_uuid): Extension<String>,
+    Extension(_claims): Extension<Claims>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // TODO: Implement real activity feed from database
+    // For now, return mock data
+    let activities = vec![
+        json!({
+            "id": "1",
+            "type": "page_created",
+            "user_name": "John Doe",
+            "user_uuid": "00000000-0000-0000-0000-000000000001",
+            "page_title": "Getting Started Guide",
+            "page_uuid": "00000000-0000-0000-0000-000000000010",
+            "area_name": "Documentation",
+            "area_uuid": "00000000-0000-0000-0000-000000000020",
+            "timestamp": "2024-01-15T10:30:00Z"
+        }),
+        json!({
+            "id": "2",
+            "type": "page_updated",
+            "user_name": "Jane Smith",
+            "user_uuid": "00000000-0000-0000-0000-000000000002",
+            "page_title": "API Reference",
+            "page_uuid": "00000000-0000-0000-0000-000000000011",
+            "area_name": "Documentation",
+            "area_uuid": "00000000-0000-0000-0000-000000000020",
+            "timestamp": "2024-01-15T09:15:00Z"
+        }),
+        json!({
+            "id": "3",
+            "type": "page_created",
+            "user_name": "Bob Johnson",
+            "user_uuid": "00000000-0000-0000-0000-000000000003",
+            "page_title": "Installation Guide",
+            "page_uuid": "00000000-0000-0000-0000-000000000012",
+            "area_name": "User Guides",
+            "area_uuid": "00000000-0000-0000-0000-000000000021",
+            "timestamp": "2024-01-14T14:20:00Z"
+        }),
+    ];
+
+    Ok(Json(json!({
+        "activities": activities
+    })))
+}
+
 /// Query parameters for listing pages
 #[derive(Debug, Deserialize)]
-struct ListPagesQuery {
+pub(crate) struct ListPagesQuery {
     folder_uuid: Option<String>,
 }
 
@@ -404,7 +498,7 @@ pub async fn delete_area_endpoint(
 
 /// Query parameters for listing folders
 #[derive(Debug, Deserialize)]
-struct ListFoldersQuery {
+pub(crate) struct ListFoldersQuery {
     parent_folder_uuid: Option<String>,
 }
 
