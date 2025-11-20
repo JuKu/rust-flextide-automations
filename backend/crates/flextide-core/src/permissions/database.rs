@@ -5,7 +5,6 @@ use crate::permissions::{
     CreatePermissionGroupRequest, CreatePermissionRequest, Permission, PermissionGroup, UserPermission,
 };
 use sqlx::Row;
-use uuid::Uuid;
 
 /// Error type for permission database operations
 #[derive(Debug, thiserror::Error)]
@@ -28,17 +27,15 @@ pub async fn create_permission_group(
     pool: &DatabasePool,
     request: CreatePermissionGroupRequest,
 ) -> Result<PermissionGroup, PermissionDatabaseError> {
-    let id = Uuid::new_v4().to_string();
     let visible = request.visible.unwrap_or(true) as i32;
     let sort_order = request.sort_order.unwrap_or(0);
 
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO permission_groups (id, name, title, description, visible, sort_order)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO permission_groups (name, title, description, visible, sort_order)
+                 VALUES (?, ?, ?, ?, ?)",
             )
-            .bind(&id)
             .bind(&request.name)
             .bind(&request.title)
             .bind(&request.description)
@@ -49,10 +46,9 @@ pub async fn create_permission_group(
         }
         DatabasePool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO permission_groups (id, name, title, description, visible, sort_order)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO permission_groups (name, title, description, visible, sort_order)
+                 VALUES ($1, $2, $3, $4, $5)",
             )
-            .bind(&id)
             .bind(&request.name)
             .bind(&request.title)
             .bind(&request.description)
@@ -63,10 +59,9 @@ pub async fn create_permission_group(
         }
         DatabasePool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO permission_groups (id, name, title, description, visible, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO permission_groups (name, title, description, visible, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )
-            .bind(&id)
             .bind(&request.name)
             .bind(&request.title)
             .bind(&request.description)
@@ -78,7 +73,6 @@ pub async fn create_permission_group(
     }
 
     Ok(PermissionGroup {
-        id,
         name: request.name,
         title: request.title,
         description: request.description,
@@ -136,14 +130,13 @@ pub async fn list_permission_groups(
 
     match pool {
         DatabasePool::MySql(p) => {
-            let rows = sqlx::query("SELECT id, name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
+            let rows = sqlx::query("SELECT name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 groups.push(PermissionGroup {
-                    id: row.get("id"),
                     name: row.get("name"),
                     title: row.get("title"),
                     description: row.get("description"),
@@ -153,14 +146,13 @@ pub async fn list_permission_groups(
             }
         }
         DatabasePool::Postgres(p) => {
-            let rows = sqlx::query("SELECT id, name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
+            let rows = sqlx::query("SELECT name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 groups.push(PermissionGroup {
-                    id: row.get("id"),
                     name: row.get("name"),
                     title: row.get("title"),
                     description: row.get("description"),
@@ -170,14 +162,13 @@ pub async fn list_permission_groups(
             }
         }
         DatabasePool::Sqlite(p) => {
-            let rows = sqlx::query("SELECT id, name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
+            let rows = sqlx::query("SELECT name, title, description, visible, sort_order FROM permission_groups ORDER BY sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 groups.push(PermissionGroup {
-                    id: row.get("id"),
                     name: row.get("name"),
                     title: row.get("title"),
                     description: row.get("description"),
@@ -230,17 +221,15 @@ pub async fn create_permission(
         ));
     }
 
-    let id = Uuid::new_v4().to_string();
     let visible = request.visible.unwrap_or(true) as i32;
     let sort_order = request.sort_order.unwrap_or(0);
 
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO permissions (permission_group_name, name, title, description, visible, sort_order)
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
-            .bind(&id)
             .bind(&request.permission_group_name)
             .bind(&request.name)
             .bind(&request.title)
@@ -252,10 +241,9 @@ pub async fn create_permission(
         }
         DatabasePool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "INSERT INTO permissions (permission_group_name, name, title, description, visible, sort_order)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
-            .bind(&id)
             .bind(&request.permission_group_name)
             .bind(&request.name)
             .bind(&request.title)
@@ -267,10 +255,9 @@ pub async fn create_permission(
         }
         DatabasePool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO permissions (id, permission_group_name, name, title, description, visible, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO permissions (permission_group_name, name, title, description, visible, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )
-            .bind(&id)
             .bind(&request.permission_group_name)
             .bind(&request.name)
             .bind(&request.title)
@@ -283,7 +270,6 @@ pub async fn create_permission(
     }
 
     Ok(Permission {
-        id,
         permission_group_name: request.permission_group_name,
         name: request.name,
         title: request.title,
@@ -342,14 +328,13 @@ pub async fn list_permissions(
 
     match pool {
         DatabasePool::MySql(p) => {
-            let rows = sqlx::query("SELECT id, permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
+            let rows = sqlx::query("SELECT permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 permissions.push(Permission {
-                    id: row.get("id"),
                     permission_group_name: row.get("permission_group_name"),
                     name: row.get("name"),
                     title: row.get("title"),
@@ -360,14 +345,13 @@ pub async fn list_permissions(
             }
         }
         DatabasePool::Postgres(p) => {
-            let rows = sqlx::query("SELECT id, permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
+            let rows = sqlx::query("SELECT permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 permissions.push(Permission {
-                    id: row.get("id"),
                     permission_group_name: row.get("permission_group_name"),
                     name: row.get("name"),
                     title: row.get("title"),
@@ -378,14 +362,13 @@ pub async fn list_permissions(
             }
         }
         DatabasePool::Sqlite(p) => {
-            let rows = sqlx::query("SELECT id, permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
+            let rows = sqlx::query("SELECT permission_group_name, name, title, description, visible, sort_order FROM permissions ORDER BY permission_group_name, sort_order, name")
                 .fetch_all(p)
                 .await?;
             
             for row in rows {
                 let visible_int: i32 = row.get("visible");
                 permissions.push(Permission {
-                    id: row.get("id"),
                     permission_group_name: row.get("permission_group_name"),
                     name: row.get("name"),
                     title: row.get("title"),

@@ -51,7 +51,7 @@ export default function DocsPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold text-flextide-neutral-text-dark">
-              Documentation
+              Docs - Knowledge Base
             </h1>
             <p className="mt-2 text-sm text-flextide-neutral-text-medium">
               Manage your documentation areas and pages

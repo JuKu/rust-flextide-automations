@@ -1457,6 +1457,240 @@ export async function deleteWebhook(webhookId: string): Promise<{ message: strin
 }
 
 // ============================================================================
+// Credentials API
+// ============================================================================
+
+export interface Credential {
+  uuid: string;
+  organization_uuid: string;
+  name: string;
+  credential_type: string;
+  creator_user_uuid: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CredentialWithData extends Credential {
+  data: any;
+}
+
+export interface CreateCredentialRequest {
+  name: string;
+  credential_type: string;
+  data: any;
+}
+
+export interface UpdateCredentialRequest {
+  name?: string;
+  data?: any; // If not provided or null, keeps the old value
+}
+
+/**
+ * List all credentials for the current organization (without values)
+ */
+export async function listCredentials(): Promise<Credential[]> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/credentials'), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch credentials:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a credential by UUID (with decrypted data)
+ */
+export async function getCredential(credentialUuid: string): Promise<CredentialWithData> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new credential
+ */
+export async function createCredential(request: CreateCredentialRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/credentials'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing credential
+ */
+export async function updateCredential(
+  credentialUuid: string,
+  request: UpdateCredentialRequest
+): Promise<{ message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a credential
+ */
+export async function deleteCredential(credentialUuid: string): Promise<{ message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete credential:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
 // Docs Module API
 // ============================================================================
 

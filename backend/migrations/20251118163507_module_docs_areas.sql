@@ -7,12 +7,12 @@
 -- ============================================================================
 
 -- Insert docs module permission group if it doesn't exist
-INSERT INTO permission_groups (id, name, title, description, visible, sort_order)
-SELECT new_groups.id, new_groups.name, new_groups.title, new_groups.description, new_groups.visible, new_groups.sort_order
+INSERT INTO permission_groups (name, title, description, visible, sort_order)
+SELECT new_groups.name, new_groups.title, new_groups.description, new_groups.visible, new_groups.sort_order
 FROM (
     VALUES
-        ('00000000-0000-0000-0000-000000000006', 'module_docs', 'Docs', 'Permissions for the Docs Module', 1, 5)
-) AS new_groups(id, name, title, description, visible, sort_order)
+        ('module_docs', 'Docs', 'Permissions for the Docs Module', 1, 5)
+) AS new_groups(name, title, description, visible, sort_order)
 WHERE NOT EXISTS (SELECT 1 FROM permission_groups WHERE permission_groups.name = new_groups.name);
 
 -- ============================================================================
@@ -20,18 +20,18 @@ WHERE NOT EXISTS (SELECT 1 FROM permission_groups WHERE permission_groups.name =
 -- ============================================================================
 
 -- Insert docs module permissions
-INSERT INTO permissions (id, name, title, description, visible, sort_order, permission_group_name)
-SELECT new_permissions.id, new_permissions.name, new_permissions.title, new_permissions.description, new_permissions.visible, new_permissions.sort_order, new_permissions.permission_group_name
+INSERT INTO permissions (name, title, description, visible, sort_order, permission_group_name)
+SELECT new_permissions.name, new_permissions.title, new_permissions.description, new_permissions.visible, new_permissions.sort_order, new_permissions.permission_group_name
 FROM (
     VALUES
-        ('10000000-0000-0000-0000-000000000100', 'module_docs_can_create_areas', 'Can create areas', 'The user is able to create new documentation areas in the organization', 1, 1, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000101', 'module_docs_can_edit_all_areas', 'Can edit all areas', 'The user is able to edit all documentation areas in the organization', 1, 2, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000102', 'module_docs_can_edit_own_areas', 'Can edit own areas', 'The user is able to edit documentation areas they created', 1, 3, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000103', 'module_docs_can_archive_areas', 'Can archive areas', 'The user is able to archive documentation areas in the organization', 1, 4, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000104', 'module_docs_can_archive_own_areas', 'Can archive own areas', 'The user is able to archive documentation areas they created', 1, 5, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000105', 'module_docs_can_delete_areas', 'Can delete areas', 'The user is able to delete documentation areas in the organization', 1, 6, 'module_docs'),
-        ('10000000-0000-0000-0000-000000000106', 'module_docs_can_delete_own_areas', 'Can delete own areas', 'The user is able to delete documentation areas they created', 1, 7, 'module_docs')
-) AS new_permissions(id, name, title, description, visible, sort_order, permission_group_name)
+        ('module_docs_can_create_areas', 'Can create areas', 'The user is able to create new documentation areas in the organization', 1, 1, 'module_docs'),
+        ('module_docs_can_edit_all_areas', 'Can edit all areas', 'The user is able to edit all documentation areas in the organization', 1, 2, 'module_docs'),
+        ('module_docs_can_edit_own_areas', 'Can edit own areas', 'The user is able to edit documentation areas they created', 1, 3, 'module_docs'),
+        ('module_docs_can_archive_areas', 'Can archive areas', 'The user is able to archive documentation areas in the organization', 1, 4, 'module_docs'),
+        ('module_docs_can_archive_own_areas', 'Can archive own areas', 'The user is able to archive documentation areas they created', 1, 5, 'module_docs'),
+        ('module_docs_can_delete_areas', 'Can delete areas', 'The user is able to delete documentation areas in the organization', 1, 6, 'module_docs'),
+        ('module_docs_can_delete_own_areas', 'Can delete own areas', 'The user is able to delete documentation areas they created', 1, 7, 'module_docs')
+) AS new_permissions(name, title, description, visible, sort_order, permission_group_name)
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permissions.name = new_permissions.name);
 
 -- ============================================================================

@@ -6,11 +6,13 @@
 
 pub mod chroma;
 pub mod github;
+pub mod gitlab;
 pub mod jira;
 pub mod openai;
 
 pub use chroma::ChromaClient;
 pub use github::GitHubClient;
+pub use gitlab::GitLabClient;
 pub use jira::JiraClient;
 pub use openai::OpenAIClient;
 

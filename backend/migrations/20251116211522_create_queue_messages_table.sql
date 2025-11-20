@@ -178,12 +178,12 @@ CREATE INDEX IF NOT EXISTS idx_runs_triggered_by
 -- Add permission for viewing execution history
 -- This permission belongs to the 'workflows' permission group
 
-INSERT INTO permissions (id, name, title, description, visible, sort_order, permission_group_name)
-SELECT new_permissions.id, new_permissions.name, new_permissions.title, new_permissions.description, new_permissions.visible, new_permissions.sort_order, new_permissions.permission_group_name
+INSERT INTO permissions (name, title, description, visible, sort_order, permission_group_name)
+SELECT new_permissions.name, new_permissions.title, new_permissions.description, new_permissions.visible, new_permissions.sort_order, new_permissions.permission_group_name
 FROM (
     VALUES
-        ('30000000-0000-0000-0000-000000000001', 'can_see_last_executions', 'Can see last executions', 'The user is able to see the execution history and last executions', 1, 10, 'workflows')
-) AS new_permissions(id, name, title, description, visible, sort_order, permission_group_name)
+        ('can_see_last_executions', 'Can see last executions', 'The user is able to see the execution history and last executions', 1, 10, 'workflows')
+) AS new_permissions(name, title, description, visible, sort_order, permission_group_name)
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permissions.name = new_permissions.name);
 
 -- ============================================================================

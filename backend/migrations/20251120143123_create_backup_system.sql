@@ -84,8 +84,8 @@ CREATE INDEX IF NOT EXISTS idx_backup_jobs_created_at ON backup_jobs(created_at)
 
 -- Insert backup permission group
 -- MySQL-compatible version using INSERT IGNORE
-INSERT IGNORE INTO permission_groups (id, name, title, description, visible, sort_order)
-VALUES ('00000000-0000-0000-0000-000000000006', 'backup', 'Backup', 'Permissions for backup management', 1, 6);
+INSERT IGNORE INTO permission_groups (name, title, description, visible, sort_order)
+VALUES ('backup', 'Backup', 'Permissions for backup management', 1, 6);
 
 -- ============================================================================
 -- PERMISSIONS
@@ -93,11 +93,11 @@ VALUES ('00000000-0000-0000-0000-000000000006', 'backup', 'Backup', 'Permissions
 
 -- Insert backup permissions
 -- MySQL-compatible version using INSERT IGNORE
-INSERT IGNORE INTO permissions (id, name, title, description, visible, sort_order, permission_group_name)
+INSERT IGNORE INTO permissions (name, title, description, visible, sort_order, permission_group_name)
 VALUES
-    ('30000000-0000-0000-0000-000000000001', 'can_create_backup', 'Can create backup', 'The user is able to create new backups', 1, 1, 'backup'),
-    ('30000000-0000-0000-0000-000000000002', 'can_see_all_backups', 'Can see all backups', 'The user is able to see all backups with pagination', 1, 2, 'backup'),
-    ('30000000-0000-0000-0000-000000000003', 'can_restore_backup', 'Can restore backup', 'The user is able to restore backups', 1, 3, 'backup'),
-    ('30000000-0000-0000-0000-000000000004', 'can_download_backup', 'Can download backup', 'The user is able to download backup files', 1, 4, 'backup'),
-    ('30000000-0000-0000-0000-000000000005', 'can_delete_backup', 'Can delete backup', 'The user is able to delete backups', 1, 5, 'backup');
+    ('can_create_backup', 'Can create backup', 'The user is able to create new backups', 1, 1, 'backup'),
+    ('can_see_all_backups', 'Can see all backups', 'The user is able to see all backups with pagination', 1, 2, 'backup'),
+    ('can_restore_backup', 'Can restore backup', 'The user is able to restore backups', 1, 3, 'backup'),
+    ('can_download_backup', 'Can download backup', 'The user is able to download backup files', 1, 4, 'backup'),
+    ('can_delete_backup', 'Can delete backup', 'The user is able to delete backups', 1, 5, 'backup');
 

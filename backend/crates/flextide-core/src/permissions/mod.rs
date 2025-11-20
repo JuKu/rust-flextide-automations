@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 /// Permission group data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionGroup {
-    pub id: String,
     pub name: String,
     pub title: String,
     pub description: Option<String>,
@@ -27,7 +26,6 @@ pub struct PermissionGroup {
 /// Permission data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Permission {
-    pub id: String,
     pub permission_group_name: String,
     pub name: String,
     pub title: String,

@@ -29,6 +29,7 @@ pub struct AppState {
 pub use flextide_core::jwt::Claims;
 
 mod backup;
+mod credentials;
 
 // Export helper functions for use in other modules
 pub fn default_page() -> u32 {
@@ -348,6 +349,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/api/webhooks", get(list_webhooks).post(create_webhook))
         .route("/api/webhooks/{id}", get(get_webhook).put(update_webhook).delete(delete_webhook))
         .nest("/api", backup::create_router())
+        .nest("/api", credentials::create_router())
         .nest("/api", flextide_modules_crm::create_router())
         .nest("/api", flextide_modules_docs::create_router())
         .layer(
