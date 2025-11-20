@@ -11,6 +11,7 @@ import {
   downloadBackup,
   listBackupJobs,
   createBackupJob,
+  updateBackupJob,
   deleteBackupJob,
   executeBackupJob,
   type Backup,
@@ -18,6 +19,7 @@ import {
   type BackupStatistics,
   type PaginatedBackups,
   type CreateBackupJobRequest,
+  type UpdateBackupJobRequest,
 } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { isServerAdmin } from "@/lib/auth";
@@ -38,8 +40,11 @@ export default function BackupPage() {
   const [selectedJob, setSelectedJob] = useState<BackupJob | null>(null);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isCreatingJob, setIsCreatingJob] = useState(false);
+  const [isEditingJob, setIsEditingJob] = useState(false);
   const [newJobTitle, setNewJobTitle] = useState("");
-  const [newJobType, setNewJobType] = useState("scheduled");
+  const [newJobType, setNewJobType] = useState("database_json_backup");
+  const [newJobSchedule, setNewJobSchedule] = useState("0 10 * * *");
+  const [newJobIsActive, setNewJobIsActive] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
@@ -129,7 +134,7 @@ export default function BackupPage() {
   const handleDownloadBackup = async (backup: Backup) => {
     try {
       await downloadBackup(backup.uuid);
-      showToast("Download functionality will be implemented soon", "info");
+      showToast("Backup download started", "success");
     } catch (err) {
       console.error("Failed to download backup:", err);
       showToast(err instanceof Error ? err.message : "Failed to download backup", "error");
@@ -178,17 +183,63 @@ export default function BackupPage() {
       const request: CreateBackupJobRequest = {
         job_type: newJobType,
         job_title: newJobTitle.trim(),
+        schedule: newJobSchedule.trim() || undefined,
+        is_active: newJobIsActive,
         json_data: undefined,
       };
       await createBackupJob(request);
       showToast("Backup job created successfully", "success");
       setIsCreateJobDialogOpen(false);
       setNewJobTitle("");
-      setNewJobType("scheduled");
+      setNewJobType("database_json_backup");
+      setNewJobSchedule("0 10 * * *");
+      setNewJobIsActive(true);
       loadData();
     } catch (err) {
       console.error("Failed to create backup job:", err);
       showToast(err instanceof Error ? err.message : "Failed to create backup job", "error");
+    } finally {
+      setIsCreatingJob(false);
+    }
+  };
+
+  const handleEditJobClick = (job: BackupJob) => {
+    setSelectedJob(job);
+    setNewJobTitle(job.job_title);
+    setNewJobType(job.job_type);
+    setNewJobSchedule(job.schedule || "");
+    setNewJobIsActive(job.is_active);
+    setIsEditingJob(true);
+    setIsCreateJobDialogOpen(true);
+  };
+
+  const handleUpdateJob = async () => {
+    if (!selectedJob || !newJobTitle.trim() || !newJobType.trim()) {
+      showToast("Please fill in all required fields", "error");
+      return;
+    }
+
+    try {
+      setIsCreatingJob(true);
+      const request: UpdateBackupJobRequest = {
+        job_title: newJobTitle.trim(),
+        schedule: newJobSchedule.trim() || undefined,
+        is_active: newJobIsActive,
+        json_data: undefined,
+      };
+      await updateBackupJob(selectedJob.uuid, request);
+      showToast("Backup job updated successfully", "success");
+      setIsCreateJobDialogOpen(false);
+      setIsEditingJob(false);
+      setSelectedJob(null);
+      setNewJobTitle("");
+      setNewJobType("database_json_backup");
+      setNewJobSchedule("0 10 * * *");
+      setNewJobIsActive(true);
+      loadData();
+    } catch (err) {
+      console.error("Failed to update backup job:", err);
+      showToast(err instanceof Error ? err.message : "Failed to update backup job", "error");
     } finally {
       setIsCreatingJob(false);
     }
@@ -434,7 +485,13 @@ export default function BackupPage() {
                       Type
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
                       Last Execution
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                      Next Execution
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
                       Actions
@@ -451,8 +508,22 @@ export default function BackupPage() {
                         <td className="px-4 py-3 text-sm text-flextide-neutral-text-medium">
                           {job.job_type}
                         </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-medium rounded ${
+                              job.is_active
+                                ? "bg-flextide-success/10 text-flextide-success"
+                                : "bg-flextide-neutral-border text-flextide-neutral-text-medium"
+                            }`}
+                          >
+                            {job.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-sm text-flextide-neutral-text-medium">
                           {formatDate(job.last_execution_timestamp)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-flextide-neutral-text-medium">
+                          {formatDate(job.next_execution_timestamp)}
                         </td>
                         <td className="px-4 py-3 text-sm text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -467,7 +538,7 @@ export default function BackupPage() {
                               </svg>
                             </button>
                             <button
-                              onClick={() => {/* TODO: Implement edit */}}
+                              onClick={() => handleEditJobClick(job)}
                               className="p-1 text-flextide-primary-accent hover:text-flextide-primary transition-colors"
                               title="Edit"
                             >
@@ -490,7 +561,7 @@ export default function BackupPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-sm text-flextide-neutral-text-medium">
+                      <td colSpan={6} className="px-4 py-8 text-center text-sm text-flextide-neutral-text-medium">
                         No backup jobs found
                       </td>
                     </tr>
@@ -595,12 +666,12 @@ export default function BackupPage() {
         </div>
       )}
 
-      {/* Create Backup Job Dialog */}
+      {/* Create/Edit Backup Job Dialog */}
       {isCreateJobDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="rounded-md bg-flextide-neutral-panel-bg border border-flextide-neutral-border p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-flextide-neutral-text-dark mb-4">
-              Create Backup Job
+              {isEditingJob ? "Edit Backup Job" : "Create Backup Job"}
             </h3>
             <div className="space-y-4 mb-6">
               <div>
@@ -624,29 +695,60 @@ export default function BackupPage() {
                   onChange={(e) => setNewJobType(e.target.value)}
                   className="w-full px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent"
                 >
-                  <option value="scheduled">Scheduled</option>
-                  <option value="manual">Manual</option>
-                  <option value="on_demand">On Demand</option>
+                  <option value="database_json_backup">Database JSON Backup</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-flextide-neutral-text-dark mb-2">
+                  Schedule (Cron Expression)
+                </label>
+                <input
+                  type="text"
+                  value={newJobSchedule}
+                  onChange={(e) => setNewJobSchedule(e.target.value)}
+                  placeholder="e.g., 0 10 * * * (every day at 10:00 AM)"
+                  className="w-full px-3 py-2 border border-flextide-neutral-border rounded-md focus:outline-none focus:ring-2 focus:ring-flextide-primary-accent"
+                />
+                <p className="mt-1 text-xs text-flextide-neutral-text-medium">
+                  Format: minute hour day month weekday (e.g., &quot;0 10 * * *&quot; = daily at 10:00 AM)
+                </p>
+              </div>
+              <div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={newJobIsActive}
+                    onChange={(e) => setNewJobIsActive(e.target.checked)}
+                    className="w-4 h-4 text-flextide-primary-accent border-flextide-neutral-border rounded focus:ring-flextide-primary-accent"
+                  />
+                  <span className="text-sm font-medium text-flextide-neutral-text-dark">Active</span>
+                </label>
+                <p className="mt-1 text-xs text-flextide-neutral-text-medium">
+                  Inactive jobs will not be executed automatically
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
                   setIsCreateJobDialogOpen(false);
+                  setIsEditingJob(false);
+                  setSelectedJob(null);
                   setNewJobTitle("");
-                  setNewJobType("scheduled");
+                  setNewJobType("database_json_backup");
+                  setNewJobSchedule("");
+                  setNewJobIsActive(true);
                 }}
                 className="px-4 py-2 text-sm border border-flextide-neutral-border rounded hover:bg-flextide-neutral-light-bg"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreateJob}
+                onClick={isEditingJob ? handleUpdateJob : handleCreateJob}
                 disabled={isCreatingJob}
                 className="px-4 py-2 text-sm bg-flextide-primary text-white rounded hover:bg-flextide-primary-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isCreatingJob ? "Creating..." : "Create"}
+                {isCreatingJob ? (isEditingJob ? "Updating..." : "Creating...") : (isEditingJob ? "Update" : "Create")}
               </button>
             </div>
           </div>

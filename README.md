@@ -191,6 +191,28 @@ Profile
 pnpm run dev
 ```
 
+### 7. Debug Logging
+
+To run the API server with debug logging enabled:
+
+**Windows (PowerShell):**
+```powershell
+cd backend
+$env:RUST_LOG="debug"; cargo run --bin api
+```
+
+**Linux/macOS (Bash):**
+```bash
+cd backend
+RUST_LOG=debug cargo run --bin api
+```
+
+You can also set more specific log levels:
+- `RUST_LOG=info` - Info level and above
+- `RUST_LOG=debug` - Debug level and above (includes SQL queries)
+- `RUST_LOG=trace` - Trace level (most verbose)
+- `RUST_LOG=flextide_core::backup=debug` - Debug logs for specific module
+
 ## 🧩 Writing Custom Nodes
 
 Flextide supports three types of nodes:

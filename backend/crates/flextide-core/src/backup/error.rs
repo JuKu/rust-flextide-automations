@@ -30,5 +30,11 @@ pub enum BackupError {
 
     #[error("Invalid job type: {0}")]
     InvalidJobType(String),
+
+    #[error("Backup execution failed: {0}")]
+    BackupExecutionFailed(String),
+
+    #[error("User not found: {0}")]
+    UserNotFound(String),
 }
 

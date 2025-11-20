@@ -6,7 +6,7 @@ use crate::database::DatabasePool;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Row;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// List all backups with pagination and file existence check
@@ -64,9 +64,9 @@ pub async fn list_backups(
     match pool {
         DatabasePool::MySql(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, backup_status,
+                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, job_type, backup_status,
                         backup_hash_checksum, is_encrypted, encryption_algorithm, encryption_master_key_name,
-                        start_timestamp, created_at
+                        error_json, start_timestamp, created_at
                  FROM backups
                  ORDER BY created_at DESC
                  LIMIT ? OFFSET ?",
@@ -80,17 +80,24 @@ pub async fn list_backups(
                 let full_path: String = row.get("full_path");
                 let file_exists = Path::new(&full_path).exists();
 
+                let error_json: Option<String> = row.get("error_json");
+                let error_value = error_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok());
+
                 let backup = Backup {
                     uuid: row.get("uuid"),
                     filename: row.get("filename"),
                     full_path: full_path.clone(),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     target_location: row.get("target_location"),
+                    job_type: row.get("job_type"),
                     backup_status: BackupStatus::from(row.get::<String, _>("backup_status").as_str()),
                     backup_hash_checksum: row.get("backup_hash_checksum"),
                     is_encrypted: row.get::<i32, _>("is_encrypted") != 0,
                     encryption_algorithm: row.get("encryption_algorithm"),
                     encryption_master_key_name: row.get("encryption_master_key_name"),
+                    error_json: error_value,
                     start_timestamp: row.get("start_timestamp"),
                     created_at: row.get("created_at"),
                     file_exists: Some(file_exists),
@@ -100,9 +107,9 @@ pub async fn list_backups(
         }
         DatabasePool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, backup_status,
+                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, job_type, backup_status,
                         backup_hash_checksum, is_encrypted, encryption_algorithm, encryption_master_key_name,
-                        start_timestamp, created_at
+                        error_json, start_timestamp, created_at
                  FROM backups
                  ORDER BY created_at DESC
                  LIMIT $1 OFFSET $2",
@@ -116,17 +123,24 @@ pub async fn list_backups(
                 let full_path: String = row.get("full_path");
                 let file_exists = Path::new(&full_path).exists();
 
+                let error_json: Option<String> = row.get("error_json");
+                let error_value = error_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok());
+
                 let backup = Backup {
                     uuid: row.get("uuid"),
                     filename: row.get("filename"),
                     full_path: full_path.clone(),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     target_location: row.get("target_location"),
+                    job_type: row.get("job_type"),
                     backup_status: BackupStatus::from(row.get::<String, _>("backup_status").as_str()),
                     backup_hash_checksum: row.get("backup_hash_checksum"),
                     is_encrypted: row.get::<i32, _>("is_encrypted") != 0,
                     encryption_algorithm: row.get("encryption_algorithm"),
                     encryption_master_key_name: row.get("encryption_master_key_name"),
+                    error_json: error_value,
                     start_timestamp: row.get("start_timestamp"),
                     created_at: row.get("created_at"),
                     file_exists: Some(file_exists),
@@ -136,9 +150,9 @@ pub async fn list_backups(
         }
         DatabasePool::Sqlite(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, backup_status,
+                "SELECT uuid, filename, full_path, creator_user_uuid, target_location, job_type, backup_status,
                         backup_hash_checksum, is_encrypted, encryption_algorithm, encryption_master_key_name,
-                        start_timestamp, created_at
+                        error_json, start_timestamp, created_at
                  FROM backups
                  ORDER BY created_at DESC
                  LIMIT ?1 OFFSET ?2",
@@ -152,17 +166,24 @@ pub async fn list_backups(
                 let full_path: String = row.get("full_path");
                 let file_exists = Path::new(&full_path).exists();
 
+                let error_json: Option<String> = row.get("error_json");
+                let error_value = error_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok());
+
                 let backup = Backup {
                     uuid: row.get("uuid"),
                     filename: row.get("filename"),
                     full_path: full_path.clone(),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     target_location: row.get("target_location"),
+                    job_type: row.get("job_type"),
                     backup_status: BackupStatus::from(row.get::<String, _>("backup_status").as_str()),
                     backup_hash_checksum: row.get("backup_hash_checksum"),
                     is_encrypted: row.get::<i32, _>("is_encrypted") != 0,
                     encryption_algorithm: row.get("encryption_algorithm"),
                     encryption_master_key_name: row.get("encryption_master_key_name"),
+                    error_json: error_value,
                     start_timestamp: row.get("start_timestamp"),
                     created_at: row.get("created_at"),
                     file_exists: Some(file_exists),
@@ -204,23 +225,54 @@ pub async fn create_backup(
     // Note: In a real implementation, we'd need to check this against a global permission system
     // For now, we'll assume the API layer handles permission checks
     
+    // Validate that the user exists in the database
+    use crate::user::user_exists_by_uuid;
+    let user_exists = user_exists_by_uuid(pool, user_uuid)
+        .await
+        .map_err(|e| match e {
+            crate::user::UserDatabaseError::Database(_) | crate::user::UserDatabaseError::UserCreation(_) => {
+                BackupError::Database(sqlx::Error::RowNotFound)
+            }
+            crate::user::UserDatabaseError::Sql(sql_err) => BackupError::Database(sql_err),
+        })?;
+    
+    if !user_exists {
+        return Err(BackupError::UserNotFound(user_uuid.to_string()));
+    }
+    
     let backup_uuid = Uuid::new_v4().to_string();
     let target_location = request.target_location.unwrap_or_else(|| "local_filesystem".to_string());
     let now = Utc::now();
+    
+    // Determine backup directory (use current working directory + backups subdirectory)
+    let backup_dir = std::env::current_dir()
+        .map(|p| p.join("backups"))
+        .unwrap_or_else(|_| PathBuf::from("backups"));
+    
+    // Ensure filename has .json.bkp extension
+    let filename = if request.filename.ends_with(".json.bkp") {
+        request.filename.clone()
+    } else {
+        format!("{}.json.bkp", request.filename)
+    };
+    
+    let full_path = backup_dir.join(&filename);
+    let full_path_str = full_path.to_string_lossy().to_string();
 
-    // Insert backup record (mocked - actual backup file creation will be implemented later)
+    // Insert backup record with IN_PROGRESS status
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO backups (uuid, filename, full_path, creator_user_uuid, target_location,
-                                     backup_status, start_timestamp, created_at)
-                 VALUES (?, ?, ?, ?, ?, 'IN_PROGRESS', ?, ?)",
+                                     job_type, backup_status, start_timestamp, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 'IN_PROGRESS', ?, ?)",
             )
             .bind(&backup_uuid)
-            .bind(&request.filename)
-            .bind(&format!("<Working directory>/backups/{}", request.filename))
+            .bind(&filename)
+            .bind(&full_path_str)
             .bind(user_uuid)
             .bind(&target_location)
+            .bind::<Option<String>>(None::<String>) // job_type - None for manual backups
             .bind(now)
             .bind(now)
             .execute(p)
@@ -229,14 +281,15 @@ pub async fn create_backup(
         DatabasePool::Postgres(p) => {
             sqlx::query(
                 "INSERT INTO backups (uuid, filename, full_path, creator_user_uuid, target_location,
-                                     backup_status, start_timestamp, created_at)
-                 VALUES ($1, $2, $3, $4, $5, 'IN_PROGRESS', $6, $7)",
+                                     job_type, backup_status, start_timestamp, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'IN_PROGRESS', $7, $8)",
             )
             .bind(&backup_uuid)
-            .bind(&request.filename)
-            .bind(&format!("<Working directory>/backups/{}", request.filename))
+            .bind(&filename)
+            .bind(&full_path_str)
             .bind(user_uuid)
             .bind(&target_location)
+            .bind::<Option<String>>(None::<String>) // job_type - None for manual backups
             .bind(now)
             .bind(now)
             .execute(p)
@@ -245,14 +298,15 @@ pub async fn create_backup(
         DatabasePool::Sqlite(p) => {
             sqlx::query(
                 "INSERT INTO backups (uuid, filename, full_path, creator_user_uuid, target_location,
-                                     backup_status, start_timestamp, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'IN_PROGRESS', ?6, ?7)",
+                                     job_type, backup_status, start_timestamp, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'IN_PROGRESS', ?7, ?8)",
             )
             .bind(&backup_uuid)
-            .bind(&request.filename)
-            .bind(&format!("<Working directory>/backups/{}", request.filename))
+            .bind(&filename)
+            .bind(&full_path_str)
             .bind(user_uuid)
             .bind(&target_location)
+            .bind::<Option<String>>(None::<String>) // job_type - None for manual backups
             .bind(now)
             .bind(now)
             .execute(p)
@@ -431,7 +485,7 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
     match pool {
         DatabasePool::MySql(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  ORDER BY created_at DESC",
             )
@@ -449,7 +503,10 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
                     job_type: row.get("job_type"),
                     job_title: row.get("job_title"),
                     json_data: json_value,
+                    schedule: row.get("schedule"),
+                    is_active: row.get::<i32, _>("is_active") != 0,
                     last_execution_timestamp: row.get("last_execution_timestamp"),
+                    next_execution_timestamp: row.get("next_execution_timestamp"),
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
                 };
@@ -458,7 +515,7 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
         }
         DatabasePool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  ORDER BY created_at DESC",
             )
@@ -476,7 +533,10 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
                     job_type: row.get("job_type"),
                     job_title: row.get("job_title"),
                     json_data: json_value,
+                    schedule: row.get("schedule"),
+                    is_active: row.get::<i32, _>("is_active") != 0,
                     last_execution_timestamp: row.get("last_execution_timestamp"),
+                    next_execution_timestamp: row.get("next_execution_timestamp"),
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
                 };
@@ -485,7 +545,7 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
         }
         DatabasePool::Sqlite(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  ORDER BY created_at DESC",
             )
@@ -503,7 +563,10 @@ pub async fn list_backup_jobs(pool: &DatabasePool) -> Result<Vec<BackupJob>, Bac
                     job_type: row.get("job_type"),
                     job_title: row.get("job_title"),
                     json_data: json_value,
+                    schedule: row.get("schedule"),
+                    is_active: row.get::<i32, _>("is_active") != 0,
                     last_execution_timestamp: row.get("last_execution_timestamp"),
+                    next_execution_timestamp: row.get("next_execution_timestamp"),
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
                 };
@@ -530,20 +593,33 @@ pub async fn create_backup_job(
     pool: &DatabasePool,
     request: CreateBackupJobRequest,
 ) -> Result<String, BackupError> {
+    use crate::backup::calculate_next_execution;
+    
     let job_uuid = Uuid::new_v4().to_string();
     let json_data_str = request.json_data.as_ref().map(|v| serde_json::to_string(v)).transpose()?;
+    let is_active = request.is_active.unwrap_or(true);
     let now = Utc::now();
+    
+    // Calculate next execution timestamp from schedule
+    let next_execution = if is_active {
+        calculate_next_execution(request.schedule.as_deref())
+    } else {
+        None
+    };
 
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, schedule, is_active, next_execution_timestamp, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&job_uuid)
             .bind(&request.job_type)
             .bind(&request.job_title)
             .bind(&json_data_str)
+            .bind(&request.schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(now)
             .execute(p)
@@ -551,13 +627,16 @@ pub async fn create_backup_job(
         }
         DatabasePool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, schedule, is_active, next_execution_timestamp, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(&job_uuid)
             .bind(&request.job_type)
             .bind(&request.job_title)
             .bind(&json_data_str)
+            .bind(&request.schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(now)
             .execute(p)
@@ -565,13 +644,16 @@ pub async fn create_backup_job(
         }
         DatabasePool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO backup_jobs (uuid, job_type, job_title, json_data, schedule, is_active, next_execution_timestamp, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )
             .bind(&job_uuid)
             .bind(&request.job_type)
             .bind(&request.job_title)
             .bind(&json_data_str)
+            .bind(&request.schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(now)
             .execute(p)
@@ -600,7 +682,7 @@ pub async fn get_backup_job(
     match pool {
         DatabasePool::MySql(p) => {
             let row = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  WHERE uuid = ?",
             )
@@ -620,14 +702,17 @@ pub async fn get_backup_job(
                 job_type: row.get("job_type"),
                 job_title: row.get("job_title"),
                 json_data: json_value,
+                schedule: row.get("schedule"),
+                is_active: row.get::<i32, _>("is_active") != 0,
                 last_execution_timestamp: row.get("last_execution_timestamp"),
+                next_execution_timestamp: row.get("next_execution_timestamp"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
         }
         DatabasePool::Postgres(p) => {
             let row = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  WHERE uuid = $1",
             )
@@ -647,14 +732,17 @@ pub async fn get_backup_job(
                 job_type: row.get("job_type"),
                 job_title: row.get("job_title"),
                 json_data: json_value,
+                schedule: row.get("schedule"),
+                is_active: row.get::<i32, _>("is_active") != 0,
                 last_execution_timestamp: row.get("last_execution_timestamp"),
+                next_execution_timestamp: row.get("next_execution_timestamp"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
         }
         DatabasePool::Sqlite(p) => {
             let row = sqlx::query(
-                "SELECT uuid, job_type, job_title, json_data, last_execution_timestamp, created_at, updated_at
+                "SELECT uuid, job_type, job_title, json_data, schedule, is_active, last_execution_timestamp, next_execution_timestamp, created_at, updated_at
                  FROM backup_jobs
                  WHERE uuid = ?1",
             )
@@ -674,7 +762,10 @@ pub async fn get_backup_job(
                 job_type: row.get("job_type"),
                 job_title: row.get("job_title"),
                 json_data: json_value,
+                schedule: row.get("schedule"),
+                is_active: row.get::<i32, _>("is_active") != 0,
                 last_execution_timestamp: row.get("last_execution_timestamp"),
+                next_execution_timestamp: row.get("next_execution_timestamp"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             })
@@ -699,21 +790,35 @@ pub async fn update_backup_job(
     job_uuid: &str,
     request: UpdateBackupJobRequest,
 ) -> Result<(), BackupError> {
+    use crate::backup::calculate_next_execution;
+    
     // Get current job to merge updates
     let current_job = get_backup_job(pool, job_uuid).await?;
     
     let job_title = request.job_title.unwrap_or(current_job.job_title);
     let json_data = request.json_data.or(current_job.json_data);
     let json_data_str = json_data.as_ref().map(|v| serde_json::to_string(v)).transpose()?;
+    let schedule = request.schedule.or(current_job.schedule);
+    let is_active = request.is_active.unwrap_or(current_job.is_active);
     let now = Utc::now();
+    
+    // Recalculate next execution timestamp if schedule or active status changed
+    let next_execution = if is_active {
+        calculate_next_execution(schedule.as_deref())
+    } else {
+        None
+    };
 
     match pool {
         DatabasePool::MySql(p) => {
             let result = sqlx::query(
-                "UPDATE backup_jobs SET job_title = ?, json_data = ?, updated_at = ? WHERE uuid = ?",
+                "UPDATE backup_jobs SET job_title = ?, json_data = ?, schedule = ?, is_active = ?, next_execution_timestamp = ?, updated_at = ? WHERE uuid = ?",
             )
             .bind(&job_title)
             .bind(&json_data_str)
+            .bind(&schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(job_uuid)
             .execute(p)
@@ -724,10 +829,13 @@ pub async fn update_backup_job(
         }
         DatabasePool::Postgres(p) => {
             let result = sqlx::query(
-                "UPDATE backup_jobs SET job_title = $1, json_data = $2, updated_at = $3 WHERE uuid = $4",
+                "UPDATE backup_jobs SET job_title = $1, json_data = $2, schedule = $3, is_active = $4, next_execution_timestamp = $5, updated_at = $6 WHERE uuid = $7",
             )
             .bind(&job_title)
             .bind(&json_data_str)
+            .bind(&schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(job_uuid)
             .execute(p)
@@ -738,10 +846,13 @@ pub async fn update_backup_job(
         }
         DatabasePool::Sqlite(p) => {
             let result = sqlx::query(
-                "UPDATE backup_jobs SET job_title = ?1, json_data = ?2, updated_at = ?3 WHERE uuid = ?4",
+                "UPDATE backup_jobs SET job_title = ?1, json_data = ?2, schedule = ?3, is_active = ?4, next_execution_timestamp = ?5, updated_at = ?6 WHERE uuid = ?7",
             )
             .bind(&job_title)
             .bind(&json_data_str)
+            .bind(&schedule)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(next_execution)
             .bind(now)
             .bind(job_uuid)
             .execute(p)
@@ -902,5 +1013,70 @@ pub async fn get_backup_statistics(
     let backup_path = "<Working directory>/backups".to_string();
 
     Ok((total as u64, last_backup, backup_path))
+}
+
+/// Update backup status
+pub async fn update_backup_status(
+    pool: &DatabasePool,
+    backup_uuid: &str,
+    status: BackupStatus,
+) -> Result<(), BackupError> {
+    let status_str: String = status.into();
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query("UPDATE backups SET backup_status = ? WHERE uuid = ?")
+                .bind(&status_str)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query("UPDATE backups SET backup_status = $1 WHERE uuid = $2")
+                .bind(&status_str)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query("UPDATE backups SET backup_status = ?1 WHERE uuid = ?2")
+                .bind(&status_str)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Update backup file path
+pub async fn update_backup_path(
+    pool: &DatabasePool,
+    backup_uuid: &str,
+    full_path: &str,
+) -> Result<(), BackupError> {
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query("UPDATE backups SET full_path = ? WHERE uuid = ?")
+                .bind(full_path)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query("UPDATE backups SET full_path = $1 WHERE uuid = $2")
+                .bind(full_path)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query("UPDATE backups SET full_path = ?1 WHERE uuid = ?2")
+                .bind(full_path)
+                .bind(backup_uuid)
+                .execute(p)
+                .await?;
+        }
+    }
+    Ok(())
 }
 

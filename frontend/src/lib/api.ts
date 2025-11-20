@@ -1768,7 +1768,10 @@ export interface BackupJob {
   job_type: string;
   job_title: string;
   json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active: boolean;
   last_execution_timestamp?: string;
+  next_execution_timestamp?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1802,11 +1805,15 @@ export interface CreateBackupJobRequest {
   job_type: string;
   job_title: string;
   json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active?: boolean;
 }
 
 export interface UpdateBackupJobRequest {
   job_title?: string;
   json_data?: Record<string, unknown>;
+  schedule?: string;
+  is_active?: boolean;
 }
 
 export async function getBackupStatistics(): Promise<BackupStatistics> {
@@ -1918,7 +1925,30 @@ export async function downloadBackup(uuid: string): Promise<void> {
       throw new Error(error.error || 'Failed to download backup');
     }
 
-    // TODO: Implement actual file download when backend is ready
+    // Get filename from Content-Disposition header or use default
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = `backup_${uuid}.json.bkp`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+    }
+
+    // Create blob from response
+    const blob = await response.blob();
+    
+    // Create download link and trigger download
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   } catch (error) {
     handleNetworkError(error);
     console.error('Failed to download backup:', error);

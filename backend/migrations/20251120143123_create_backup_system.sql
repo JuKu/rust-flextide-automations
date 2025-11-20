@@ -17,11 +17,13 @@ CREATE TABLE IF NOT EXISTS backups (
     full_path TEXT NOT NULL,
     creator_user_uuid CHAR(36) NOT NULL,
     target_location VARCHAR(100) NOT NULL DEFAULT 'local_filesystem',
+    job_type VARCHAR(50),
     backup_status VARCHAR(50) NOT NULL DEFAULT 'COMPLETED' CHECK (backup_status IN ('COMPLETED', 'FAILED', 'IN_PROGRESS', 'CANCELLED')),
     backup_hash_checksum VARCHAR(128),
     is_encrypted INTEGER NOT NULL DEFAULT 0,
     encryption_algorithm VARCHAR(50),
     encryption_master_key_name VARCHAR(255),
+    error_json TEXT,
     start_timestamp TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_user_uuid) REFERENCES users(uuid) ON DELETE RESTRICT
@@ -36,7 +38,10 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
     job_type VARCHAR(50) NOT NULL,
     job_title VARCHAR(255) NOT NULL,
     json_data TEXT,
+    schedule VARCHAR(255),
+    is_active INTEGER NOT NULL DEFAULT 1,
     last_execution_timestamp TIMESTAMP,
+    next_execution_timestamp TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

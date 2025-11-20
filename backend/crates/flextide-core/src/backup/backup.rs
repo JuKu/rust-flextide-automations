@@ -45,11 +45,13 @@ pub struct Backup {
     pub full_path: String,
     pub creator_user_uuid: String,
     pub target_location: String,
+    pub job_type: Option<String>,
     pub backup_status: BackupStatus,
     pub backup_hash_checksum: Option<String>,
     pub is_encrypted: bool,
     pub encryption_algorithm: Option<String>,
     pub encryption_master_key_name: Option<String>,
+    pub error_json: Option<Value>,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     /// Whether the backup file still exists on the file system
@@ -64,7 +66,10 @@ pub struct BackupJob {
     pub job_type: String,
     pub job_title: String,
     pub json_data: Option<Value>,
+    pub schedule: Option<String>,
+    pub is_active: bool,
     pub last_execution_timestamp: Option<DateTime<Utc>>,
+    pub next_execution_timestamp: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -92,6 +97,8 @@ pub struct CreateBackupJobRequest {
     pub job_type: String,
     pub job_title: String,
     pub json_data: Option<Value>,
+    pub schedule: Option<String>,
+    pub is_active: Option<bool>,
 }
 
 /// Update backup job request
@@ -99,5 +106,7 @@ pub struct CreateBackupJobRequest {
 pub struct UpdateBackupJobRequest {
     pub job_title: Option<String>,
     pub json_data: Option<Value>,
+    pub schedule: Option<String>,
+    pub is_active: Option<bool>,
 }
 

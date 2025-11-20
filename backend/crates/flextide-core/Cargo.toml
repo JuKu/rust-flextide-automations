@@ -15,13 +15,14 @@ dotenvy = "0.15"
 async-trait = "0.1"
 dashmap = "6.1"
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.15"
 tracing = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 aes-gcm = { version = "0.10", features = ["std"] }
-rand = "0.8"
+rand = "0.9"
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt", "rt-multi-thread", "macros"] }
