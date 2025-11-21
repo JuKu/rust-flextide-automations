@@ -156,3 +156,67 @@ pub struct PeekResult {
     pub metadatas: Vec<Option<DocumentMetadata>>,
 }
 
+/// Chroma database credentials structure
+/// 
+/// This struct represents how Chroma credentials are stored in the credentials database table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChromaCredentials {
+    /// Base URL of the Chroma server (e.g., "http://localhost:8000")
+    pub base_url: String,
+    
+    /// Whether the connection uses secured mode (HTTPS/TLS)
+    #[serde(default = "default_true")]
+    pub secured_mode: bool,
+    
+    /// Authentication method (e.g., "token", "none")
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+    
+    /// Token transport header name (e.g., "Authorization" or "X-Chroma-Token")
+    #[serde(default = "default_token_transport_header")]
+    pub token_transport_header: String,
+    
+    /// Token prefix (e.g., "Bearer " for Authorization header)
+    #[serde(default = "default_token_prefix")]
+    pub token_prefix: String,
+    
+    /// Authentication token
+    pub auth_token: String,
+    
+    /// Tenant name (default: "default_tenant")
+    #[serde(default = "default_tenant")]
+    pub tenant_name: String,
+    
+    /// Database name (default: "default_database")
+    #[serde(default = "default_database")]
+    pub database_name: String,
+    
+    /// Additional headers as key-value pairs
+    #[serde(default)]
+    pub additional_headers: Vec<(String, String)>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_auth_method() -> String {
+    "token".to_string()
+}
+
+fn default_token_transport_header() -> String {
+    "Authorization".to_string()
+}
+
+fn default_token_prefix() -> String {
+    "Bearer ".to_string()
+}
+
+fn default_tenant() -> String {
+    "default_tenant".to_string()
+}
+
+fn default_database() -> String {
+    "default_database".to_string()
+}
+

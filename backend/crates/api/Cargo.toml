@@ -18,6 +18,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 uuid = { version = "1.10", features = ["v4", "v5"] }
 flextide-core = { path = "../flextide-core" }
+integrations = { path = "../integrations" }
 flextide-modules-crm = { path = "../modules/crm" }
 flextide-modules-docs = { path = "../modules/docs" }
 cron = "0.15"

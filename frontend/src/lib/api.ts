@@ -1079,6 +1079,38 @@ export interface IntegrationDetail {
   pricing_type: "free" | "one_time" | "subscription";
 }
 
+export interface ChromaStatistics {
+  configured_databases: number;
+  total_collections: number;
+  total_documents: number;
+}
+
+export interface ChromaDatabaseInfo {
+  uuid: string;
+  name: string;
+  base_url: string;
+  tenant_name: string;
+  database_name: string;
+  secured_mode: boolean;
+}
+
+export interface ChromaCollectionInfo {
+  id: string;
+  name: string;
+  database_uuid: string;
+  database_name: string;
+  tenant_name: string;
+  document_count: number;
+}
+
+export interface ChromaDatabasesResponse {
+  databases: ChromaDatabaseInfo[];
+}
+
+export interface ChromaCollectionsResponse {
+  collections: ChromaCollectionInfo[];
+}
+
 export interface IntegrationsListResponse {
   integrations: IntegrationDetail[];
   total: number;
@@ -2302,6 +2334,81 @@ export async function executeBackupJob(uuid: string): Promise<void> {
   } catch (error) {
     handleNetworkError(error);
     console.error('Failed to execute backup job:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get Chroma integration statistics
+ */
+export async function getChromaStatistics(): Promise<ChromaStatistics> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/statistics'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/statistics'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get Chroma statistics' }));
+      throw new Error(error.error || 'Failed to get Chroma statistics');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get Chroma statistics:', error);
+    throw error;
+  }
+}
+
+/**
+ * List all configured Chroma databases
+ */
+export async function listChromaDatabases(): Promise<ChromaDatabasesResponse> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/databases'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/databases'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list Chroma databases' }));
+      throw new Error(error.error || 'Failed to list Chroma databases');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list Chroma databases:', error);
+    throw error;
+  }
+}
+
+/**
+ * List all Chroma collections accessible to this organization
+ */
+export async function listChromaCollections(): Promise<ChromaCollectionsResponse> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/collections'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/collections'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list Chroma collections' }));
+      throw new Error(error.error || 'Failed to list Chroma collections');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list Chroma collections:', error);
     throw error;
   }
 }

@@ -604,6 +604,130 @@ pub async fn get_credentials(
     }
 }
 
+/// Get all credentials of a specific type for an organization (with decrypted data)
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `manager` - Credentials manager for decryption
+/// * `organization_uuid` - UUID of the organization
+/// * `credential_type` - Type of credential to filter by (e.g., "openai_credential", "github_credential")
+///
+/// # Returns
+/// Vector of credentials with decrypted data, filtered by credential type
+///
+/// # Errors
+/// Returns `CredentialsError` if:
+/// - Decryption fails
+/// - Database operation fails
+///
+/// # Note
+/// This function is useful for workflows and worker nodes that need all credentials of a specific type.
+/// It does not perform permission checks, as it may be called from worker nodes without user context.
+pub async fn get_credentials_by_type(
+    pool: &DatabasePool,
+    manager: &CredentialsManager,
+    organization_uuid: &str,
+    credential_type: &str,
+) -> Result<Vec<Credential>, CredentialsError> {
+
+    // Query credentials by type
+    match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = ? AND credential_type = ?
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = $1 AND credential_type = $2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = ?1 AND credential_type = ?2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+    }
+}
+
 /// Update a credential (overwrites encrypted data)
 ///
 /// # Arguments
