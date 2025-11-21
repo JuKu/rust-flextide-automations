@@ -112,6 +112,15 @@ impl ChromaClient {
             if let Ok(value) = header_value.parse() {
                 headers.insert(header_name, value);
             }
+        } else if creds.auth_method == "basic_auth" && !creds.auth_token.is_empty() {
+            // For basic_auth, auth_token should be in format "username:password"
+            // We'll encode it as Basic Auth header
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&creds.auth_token);
+            let header_value = format!("Basic {}", encoded);
+            if let Ok(value) = header_value.parse() {
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+            }
         }
 
         // Add additional headers
@@ -588,7 +597,7 @@ impl ChromaClient {
         let client = Client::new();
         let url = format!(
             "{}/api/{}/tenants/{}/databases/{}/collections",
-            creds.base_url, CHROMA_API_VERSION, tenant, database
+            creds.base_url, creds.api_version, tenant, database
         );
 
         debug!("Listing Chroma collections for tenant={}, database={}", tenant, database);
@@ -625,7 +634,7 @@ impl ChromaClient {
         let client = Client::new();
         let url = format!(
             "{}/api/{}/tenants/{}",
-            creds.base_url, CHROMA_API_VERSION, tenant_name
+            creds.base_url, creds.api_version, tenant_name
         );
 
         debug!("Checking if tenant exists: {}", tenant_name);
@@ -648,6 +657,88 @@ impl ChromaClient {
                 Err(Self::handle_error_static(status, error_text))
             }
         }
+    }
+
+    /// Test connection to Chroma server and verify tenant/database access
+    /// 
+    /// This method:
+    /// 1. Checks if the tenant exists by calling GET /api/{version}/tenants/{tenant}
+    /// 2. If database is provided, checks if the database exists by calling GET /api/{version}/tenants/{tenant}/databases/{database}
+    ///    Otherwise, lists databases by calling GET /api/{version}/tenants/{tenant}/databases
+    pub async fn test_connection_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+    ) -> Result<(), ChromaError> {
+        let client = Client::new();
+        
+        // Step 1: Check if tenant exists
+        let tenant_url = format!(
+            "{}/api/{}/tenants/{}",
+            creds.base_url, creds.api_version, creds.tenant_name
+        );
+        
+        debug!("Testing Chroma connection: checking tenant {}", creds.tenant_name);
+        
+        let headers = Self::build_headers_from_credentials(creds);
+        
+        let response = client
+            .get(&tenant_url)
+            .headers(headers.clone())
+            .send()
+            .await?;
+        
+        let status = response.status();
+        
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Self::handle_error_static(status, error_text));
+        }
+        
+        // Step 2: Check database if provided
+        if !creds.database_name.is_empty() {
+            let db_url = format!(
+                "{}/api/{}/tenants/{}/databases/{}",
+                creds.base_url, creds.api_version, creds.tenant_name, creds.database_name
+            );
+            
+            debug!("Testing Chroma connection: checking database {}", creds.database_name);
+            
+            let db_response = client
+                .get(&db_url)
+                .headers(headers)
+                .send()
+                .await?;
+            
+            let db_status = db_response.status();
+            
+            if !db_status.is_success() {
+                let error_text = db_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Self::handle_error_static(db_status, error_text));
+            }
+        } else {
+            // If no database name, try to list databases
+            let db_list_url = format!(
+                "{}/api/{}/tenants/{}/databases",
+                creds.base_url, creds.api_version, creds.tenant_name
+            );
+            
+            debug!("Testing Chroma connection: listing databases");
+            
+            let db_response = client
+                .get(&db_list_url)
+                .headers(headers)
+                .send()
+                .await?;
+            
+            let db_status = db_response.status();
+            
+            if !db_status.is_success() {
+                let error_text = db_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Self::handle_error_static(db_status, error_text));
+            }
+        }
+        
+        info!("Chroma connection test successful");
+        Ok(())
     }
 
     /// Static version of handle_error for use in static methods

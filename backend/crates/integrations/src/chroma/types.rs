@@ -194,6 +194,10 @@ pub struct ChromaCredentials {
     /// Additional headers as key-value pairs
     #[serde(default)]
     pub additional_headers: Vec<(String, String)>,
+    
+    /// API version (default: "v2")
+    #[serde(default = "default_api_version")]
+    pub api_version: String,
 }
 
 fn default_true() -> bool {
@@ -205,7 +209,7 @@ fn default_auth_method() -> String {
 }
 
 fn default_token_transport_header() -> String {
-    "Authorization".to_string()
+    "x-chroma-token".to_string()
 }
 
 fn default_token_prefix() -> String {
@@ -218,5 +222,9 @@ fn default_tenant() -> String {
 
 fn default_database() -> String {
     "default_database".to_string()
+}
+
+fn default_api_version() -> String {
+    "v2".to_string()
 }
 

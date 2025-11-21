@@ -10,6 +10,13 @@ import {
   ChromaDatabaseInfo,
   ChromaCollectionInfo,
 } from "@/lib/api";
+import { AddChromaDatabaseDialog } from "@/components/integrations/AddChromaDatabaseDialog";
+import { EditChromaDatabaseDialog } from "@/components/integrations/EditChromaDatabaseDialog";
+import { DeleteChromaDatabaseDialog } from "@/components/integrations/DeleteChromaDatabaseDialog";
+import { hasPermission } from "@/lib/permissions";
+import { getCurrentOrganizationUuid } from "@/lib/organization";
+import { deleteChromaDatabase, getChromaDatabase, testChromaConnection } from "@/lib/api";
+import { showToast } from "@/lib/toast";
 
 export default function ChromaOverviewPage() {
   const [statistics, setStatistics] = useState<ChromaStatistics | null>(null);
@@ -17,32 +24,117 @@ export default function ChromaOverviewPage() {
   const [collections, setCollections] = useState<ChromaCollectionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedDatabaseUuid, setSelectedDatabaseUuid] = useState<string | null>(null);
+  const [selectedDatabase, setSelectedDatabase] = useState<ChromaDatabaseInfo | null>(null);
+  const [canAddDatabase, setCanAddDatabase] = useState(false);
+  const [canEditDatabase, setCanEditDatabase] = useState(false);
+  const [canDeleteDatabase, setCanDeleteDatabase] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [testingConnection, setTestingConnection] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const [stats, dbs, cols] = await Promise.all([
-          getChromaStatistics(),
-          listChromaDatabases(),
-          listChromaCollections(),
-        ]);
-
-        setStatistics(stats);
-        setDatabases(dbs.databases);
-        setCollections(cols.collections);
-      } catch (err) {
-        console.error("Failed to load Chroma data:", err);
-        setError(err instanceof Error ? err.message : "Failed to load data");
-      } finally {
-        setLoading(false);
-      }
-    }
-
+    checkPermissions();
     loadData();
   }, []);
+
+  async function checkPermissions() {
+    const orgUuid = getCurrentOrganizationUuid();
+    if (!orgUuid) return;
+
+    const [hasAddPermission, hasEditPermission, hasDeletePermission] = await Promise.all([
+      hasPermission("integration_chroma_can_add_database", orgUuid),
+      hasPermission("integration_chroma_can_add_database", orgUuid), // Same permission for edit
+      hasPermission("can_delete_credentials", orgUuid),
+    ]);
+    setCanAddDatabase(hasAddPermission);
+    setCanEditDatabase(hasEditPermission);
+    setCanDeleteDatabase(hasDeletePermission);
+  }
+
+  async function loadData() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [stats, dbs, cols] = await Promise.all([
+        getChromaStatistics(),
+        listChromaDatabases(),
+        listChromaCollections(),
+      ]);
+
+      setStatistics(stats);
+      setDatabases(dbs.databases);
+      setCollections(cols.collections);
+    } catch (err) {
+      console.error("Failed to load Chroma data:", err);
+      setError(err instanceof Error ? err.message : "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleAddSuccess() {
+    setIsAddDialogOpen(false);
+    loadData();
+  }
+
+  function handleEditClick(db: ChromaDatabaseInfo) {
+    setSelectedDatabaseUuid(db.uuid);
+    setIsEditDialogOpen(true);
+  }
+
+  function handleEditSuccess() {
+    setIsEditDialogOpen(false);
+    setSelectedDatabaseUuid(null);
+    loadData();
+  }
+
+  function handleDeleteClick(db: ChromaDatabaseInfo) {
+    setSelectedDatabase(db);
+    setIsDeleteDialogOpen(true);
+  }
+
+  async function handleDeleteConfirm() {
+    if (!selectedDatabase) return;
+
+    try {
+      setDeleting(true);
+      await deleteChromaDatabase(selectedDatabase.uuid);
+      showToast("Chroma database connection deleted successfully", "success");
+      setIsDeleteDialogOpen(false);
+      setSelectedDatabase(null);
+      loadData();
+    } catch (err) {
+      console.error("Failed to delete Chroma database:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete Chroma database";
+      showToast(errorMessage, "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleTestConnection(db: ChromaDatabaseInfo) {
+    try {
+      setTestingConnection(db.uuid);
+      
+      // Get full database credentials
+      const databaseData = await getChromaDatabase(db.uuid);
+      
+      // Test the connection
+      await testChromaConnection({ credentials: databaseData.credentials });
+      
+      showToast(`Connection test successful for ${db.name}`, "success");
+    } catch (err) {
+      console.error("Failed to test connection:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to test connection";
+      showToast(`Connection test failed for ${db.name}: ${errorMessage}`, "error");
+    } finally {
+      setTestingConnection(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -118,15 +210,14 @@ export default function ChromaOverviewPage() {
               <h2 className="text-lg font-semibold text-flextide-neutral-text-dark">
                 Configured Databases
               </h2>
-              <button
-                className="px-4 py-2 bg-flextide-primary text-white rounded-md hover:bg-flextide-primary-accent transition-colors text-sm"
-                onClick={() => {
-                  // TODO: Implement add database functionality
-                  alert("Add database functionality will be implemented later");
-                }}
-              >
-                Add Database
-              </button>
+              {canAddDatabase && (
+                <button
+                  className="px-4 py-2 bg-flextide-primary text-white rounded-md hover:bg-flextide-primary-accent transition-colors text-sm"
+                  onClick={() => setIsAddDialogOpen(true)}
+                >
+                  Add Database
+                </button>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -144,12 +235,17 @@ export default function ChromaOverviewPage() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
                       Database
                     </th>
+                    {(canEditDatabase || canDeleteDatabase) && (
+                      <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                        Actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-flextide-neutral-border">
                   {databases.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-flextide-neutral-text-medium">
+                      <td colSpan={canEditDatabase || canDeleteDatabase ? 5 : 4} className="px-4 py-8 text-center text-flextide-neutral-text-medium">
                         No databases configured
                       </td>
                     </tr>
@@ -168,6 +264,94 @@ export default function ChromaOverviewPage() {
                         <td className="px-4 py-3 text-sm text-flextide-neutral-text-medium">
                           {db.database_name}
                         </td>
+                        {(canEditDatabase || canDeleteDatabase) && (
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleTestConnection(db)}
+                                disabled={testingConnection === db.uuid}
+                                className="p-2 text-flextide-success hover:bg-flextide-success/10 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Test database connection"
+                              >
+                                {testingConnection === db.uuid ? (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-4 w-4 animate-spin"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                    />
+                                  </svg>
+                                ) : (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                  </svg>
+                                )}
+                              </button>
+                              {canEditDatabase && (
+                              <button
+                                onClick={() => handleEditClick(db)}
+                                className="p-2 text-flextide-primary-accent hover:bg-flextide-primary-accent/10 rounded-md transition-colors"
+                                title="Edit database connection"
+                              >
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                  />
+                                </svg>
+                              </button>
+                            )}
+                            {canDeleteDatabase && (
+                              <button
+                                onClick={() => handleDeleteClick(db)}
+                                className="p-2 text-flextide-error hover:bg-flextide-error/10 rounded-md transition-colors"
+                                title="Delete database connection"
+                              >
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                  />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -232,6 +416,33 @@ export default function ChromaOverviewPage() {
           </div>
         </div>
       </div>
+
+      <AddChromaDatabaseDialog
+        isOpen={isAddDialogOpen}
+        onClose={() => setIsAddDialogOpen(false)}
+        onSuccess={handleAddSuccess}
+      />
+
+      <EditChromaDatabaseDialog
+        isOpen={isEditDialogOpen}
+        onClose={() => {
+          setIsEditDialogOpen(false);
+          setSelectedDatabaseUuid(null);
+        }}
+        onSuccess={handleEditSuccess}
+        databaseUuid={selectedDatabaseUuid}
+      />
+
+      <DeleteChromaDatabaseDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => {
+          setIsDeleteDialogOpen(false);
+          setSelectedDatabase(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        database={selectedDatabase}
+        loading={deleting}
+      />
     </AppLayout>
   );
 }
