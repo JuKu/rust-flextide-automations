@@ -3,7 +3,7 @@
 // delete and put are used in route macros but compiler doesn't detect macro usage
 #[allow(unused_imports)]
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::{delete, get, post, put},
@@ -14,7 +14,7 @@ use flextide_core::database::DatabasePool;
 use flextide_core::events::{Event, EventPayload};
 use flextide_core::jwt::Claims;
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
-use integrations::chroma::{ChromaClient, ChromaCredentials, ChromaError};
+use integrations::chroma::{ChromaClient, ChromaCredentials, ChromaError, CreateCollectionRequest, UpdateCollectionRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use crate::AppState;
@@ -26,7 +26,8 @@ pub fn create_router() -> Router<AppState> {
         .route("/integrations/chroma/databases", get(list_chroma_databases).post(create_chroma_database))
         .route("/integrations/chroma/databases/{uuid}", get(get_chroma_database).put(update_chroma_database).delete(delete_chroma_database))
         .route("/integrations/chroma/test-connection", post(test_chroma_connection))
-        .route("/integrations/chroma/collections", get(list_chroma_collections))
+        .route("/integrations/chroma/collections", get(list_chroma_collections).post(create_chroma_collection))
+        .route("/integrations/chroma/collections/{collection_id}", get(get_chroma_collection).put(update_chroma_collection).delete(delete_chroma_collection))
 }
 
 #[derive(Debug, Serialize)]
@@ -171,31 +172,64 @@ pub async fn list_chroma_databases(
 ///
 /// GET /api/integrations/chroma/collections
 pub async fn list_chroma_collections(
-    Extension(_pool): Extension<DatabasePool>,
-    Extension(_org_uuid): Extension<String>,
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
     Extension(_claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
-    // Mock data for now - will be implemented later
-    let collections = vec![
-        ChromaCollectionInfo {
-            id: "mock-collection-1".to_string(),
-            name: "Sample Collection 1".to_string(),
-            database_uuid: "mock-db-1".to_string(),
-            database_name: "Default Database".to_string(),
-            tenant_name: "default_tenant".to_string(),
-            document_count: 42,
-        },
-        ChromaCollectionInfo {
-            id: "mock-collection-2".to_string(),
-            name: "Sample Collection 2".to_string(),
-            database_uuid: "mock-db-1".to_string(),
-            database_name: "Default Database".to_string(),
-            tenant_name: "default_tenant".to_string(),
-            document_count: 15,
-        },
-    ];
+    use flextide_core::credentials::CredentialsManager;
 
-    Ok(Json(json!({ "collections": collections })))
+    // Get credentials manager
+    let manager = CredentialsManager::new().map_err(|e| {
+        tracing::error!("Failed to initialize credentials manager: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to initialize credentials manager" })),
+        )
+    })?;
+
+    // Get all Chroma database credentials
+    let credentials = get_credentials_by_type(&pool, &manager, &org_uuid, "chroma_database")
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get Chroma credentials: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to get Chroma credentials" })),
+            )
+        })?;
+
+    let mut all_collections: Vec<ChromaCollectionInfo> = Vec::new();
+
+    // Fetch collections from each database
+    for cred in &credentials {
+        if let Ok(chroma_creds) = parse_chroma_credentials(&cred.data) {
+            match ChromaClient::list_collections_v2_with_credentials(
+                &chroma_creds,
+                &chroma_creds.tenant_name,
+                &chroma_creds.database_name,
+            )
+            .await
+            {
+                Ok(collections) => {
+                    for collection in collections {
+                        all_collections.push(ChromaCollectionInfo {
+                            id: collection.id,
+                            name: collection.name,
+                            database_uuid: cred.uuid.clone(),
+                            database_name: chroma_creds.database_name.clone(),
+                            tenant_name: chroma_creds.tenant_name.clone(),
+                            document_count: 0, // TODO: Get actual document count if needed
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to list collections for database {}: {}", cred.name, e);
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({ "collections": all_collections })))
 }
 
 /// Request to create a new Chroma database connection
@@ -965,6 +999,789 @@ pub async fn delete_chroma_database(
 
     Ok(Json(json!({
         "message": "Chroma database connection deleted successfully"
+    })))
+}
+
+/// Request to create a new Chroma collection
+#[derive(Debug, Deserialize)]
+pub struct CreateChromaCollectionRequest {
+    pub database_uuid: String,
+    pub name: String,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Request to update a Chroma collection
+#[derive(Debug, Deserialize)]
+pub struct UpdateChromaCollectionRequest {
+    pub database_uuid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_metadata: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Request to delete a Chroma collection
+#[derive(Debug, Deserialize)]
+pub struct DeleteChromaCollectionRequest {
+    pub database_uuid: String,
+}
+
+/// Create a new Chroma collection
+///
+/// POST /api/integrations/chroma/collections
+pub async fn create_chroma_collection(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Json(payload): Json<CreateChromaCollectionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Validate input
+    if payload.name.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Collection name is required" })),
+        ));
+    }
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "integration_chroma_can_add_collection",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to create Chroma collections"
+            })),
+        ));
+    }
+
+    // Get credentials manager
+    let manager = CredentialsManager::new().map_err(|e| {
+        tracing::error!("Failed to initialize credentials manager: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to initialize credentials manager" })),
+        )
+    })?;
+
+    // Get the database credential
+    let credential = get_credential(
+        &state.db_pool,
+        &manager,
+        &payload.database_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to get credential: {}", e);
+        match e {
+            flextide_core::credentials::CredentialsError::CredentialNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Chroma database connection not found" })),
+            ),
+            flextide_core::credentials::CredentialsError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Permission denied" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to get Chroma database connection" })),
+            ),
+        }
+    })?;
+
+    // Verify it's a chroma_database credential
+    if credential.credential_type != "chroma_database" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Credential is not a Chroma database connection" })),
+        ));
+    }
+
+    // Parse credentials
+    let chroma_creds = parse_chroma_credentials(&credential.data).map_err(|e| {
+        tracing::error!("Failed to parse Chroma credentials: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to parse Chroma credentials" })),
+        )
+    })?;
+
+    // Create collection request
+    // Convert serde_json::Map to HashMap if metadata is provided
+    let metadata = payload.metadata.map(|map| {
+        map.into_iter().collect::<std::collections::HashMap<String, serde_json::Value>>()
+    });
+    
+    let create_request = CreateCollectionRequest {
+        name: payload.name.trim().to_string(),
+        metadata,
+        embedding_function: None, // Can be extended later if needed
+    };
+
+    // Create the collection
+    let collection = ChromaClient::create_collection_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+        create_request,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create Chroma collection: {}", e);
+        
+        // Provide user-friendly error messages for specific error types
+        let (status_code, error_message) = match e {
+            ChromaError::CollectionExists(msg) => {
+                // Try to extract collection name from error message
+                let collection_name = if let Some(start) = msg.find('[') {
+                    if let Some(end) = msg[start..].find(']') {
+                        &msg[start + 1..start + end]
+                    } else {
+                        &payload.name.trim()
+                    }
+                } else {
+                    &payload.name.trim()
+                };
+                (
+                    StatusCode::CONFLICT,
+                    format!("Collection '{}' already exists in this database", collection_name),
+                )
+            }
+            ChromaError::InvalidApiKey => (
+                StatusCode::UNAUTHORIZED,
+                "Invalid API key or authentication failed. Please check your credentials.".to_string(),
+            ),
+            ChromaError::ApiError(msg) => {
+                // Check if it's a 403/401/404 error
+                if msg.contains("403") || msg.contains("Forbidden") {
+                    (
+                        StatusCode::FORBIDDEN,
+                        "Invalid API key or authentication failed. Please check your credentials.".to_string(),
+                    )
+                } else if msg.contains("401") || msg.contains("Unauthorized") {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        "Authentication failed. Please check your API key.".to_string(),
+                    )
+                } else if msg.contains("404") || msg.contains("Not Found") {
+                    (
+                        StatusCode::NOT_FOUND,
+                        "Database or tenant not found. Please check your configuration.".to_string(),
+                    )
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to create collection: {}", msg),
+                    )
+                }
+            }
+            ChromaError::HttpError(e) => {
+                if e.is_timeout() {
+                    (
+                        StatusCode::REQUEST_TIMEOUT,
+                        "Connection timeout. Please check your network connection and try again.".to_string(),
+                    )
+                } else if e.is_connect() {
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        "Unable to connect to Chroma server. Please check the base URL.".to_string(),
+                    )
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Connection error: {}", e),
+                    )
+                }
+            }
+            _ => (
+                StatusCode::BAD_REQUEST,
+                format!("Failed to create collection: {}", e),
+            ),
+        };
+        
+        (status_code, Json(json!({ "error": error_message })))
+    })?;
+
+    // Emit event for Chroma collection created
+    let event = Event::new(
+        "integration_chroma_collection_created",
+        EventPayload::new(json!({
+            "entity_type": "chroma_collection",
+            "entity_id": collection.id,
+            "data": {
+                "name": collection.name,
+                "database_uuid": payload.database_uuid,
+                "tenant_name": chroma_creds.tenant_name,
+                "database_name": chroma_creds.database_name,
+            }
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    state.event_dispatcher.emit(event).await;
+
+    Ok(Json(json!({
+        "id": collection.id,
+        "name": collection.name,
+        "message": "Chroma collection created successfully"
+    })))
+}
+
+/// Get a single Chroma collection
+///
+/// GET /api/integrations/chroma/collections/{collection_id}?database_uuid={uuid}
+#[derive(Debug, Deserialize)]
+pub struct GetChromaCollectionQuery {
+    pub database_uuid: String,
+}
+
+pub async fn get_chroma_collection(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Path(collection_id): Path<String>,
+    Query(query): Query<GetChromaCollectionQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Get credentials manager
+    let manager = CredentialsManager::new().map_err(|e| {
+        tracing::error!("Failed to initialize credentials manager: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to initialize credentials manager" })),
+        )
+    })?;
+
+    // Get the database credential
+    let credential = get_credential(
+        &state.db_pool,
+        &manager,
+        &query.database_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to get credential: {}", e);
+        match e {
+            flextide_core::credentials::CredentialsError::CredentialNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Chroma database connection not found" })),
+            ),
+            flextide_core::credentials::CredentialsError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Permission denied" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to get Chroma database connection" })),
+            ),
+        }
+    })?;
+
+    // Verify it's a chroma_database credential
+    if credential.credential_type != "chroma_database" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Credential is not a Chroma database connection" })),
+        ));
+    }
+
+    // Parse credentials
+    let chroma_creds = parse_chroma_credentials(&credential.data).map_err(|e| {
+        tracing::error!("Failed to parse Chroma credentials: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to parse Chroma credentials" })),
+        )
+    })?;
+
+    // Get the collection - Chroma GET endpoint uses collection name, not ID
+    // We need to find the collection by ID first by listing all collections
+    let all_collections = ChromaClient::list_collections_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to list Chroma collections: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Failed to list collections: {}", e) })),
+        )
+    })?;
+
+    // Find the collection by ID
+    let collection = all_collections
+        .into_iter()
+        .find(|c| c.id == collection_id)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("Collection with ID {} not found", collection_id) })),
+            )
+        })?;
+
+    // Chroma GET endpoint requires collection name, not ID
+    // Call get_collection_v2_with_credentials with the name to get full details
+    let full_collection = ChromaClient::get_collection_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+        &collection.name,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to get Chroma collection: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Failed to get collection: {}", e) })),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "id": full_collection.id,
+        "name": full_collection.name,
+        "metadata": full_collection.metadata,
+        "database_uuid": query.database_uuid,
+        "tenant_name": chroma_creds.tenant_name,
+        "database_name": chroma_creds.database_name,
+    })))
+}
+
+/// Update a Chroma collection
+///
+/// PUT /api/integrations/chroma/collections/{collection_id}
+pub async fn update_chroma_collection(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Path(collection_id): Path<String>,
+    Json(payload): Json<UpdateChromaCollectionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "integration_chroma_can_edit_collection",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to edit Chroma collections"
+            })),
+        ));
+    }
+
+    // Get credentials manager
+    let manager = CredentialsManager::new().map_err(|e| {
+        tracing::error!("Failed to initialize credentials manager: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to initialize credentials manager" })),
+        )
+    })?;
+
+    // Get the database credential
+    let credential = get_credential(
+        &state.db_pool,
+        &manager,
+        &payload.database_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to get credential: {}", e);
+        match e {
+            flextide_core::credentials::CredentialsError::CredentialNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Chroma database connection not found" })),
+            ),
+            flextide_core::credentials::CredentialsError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Permission denied" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to get Chroma database connection" })),
+            ),
+        }
+    })?;
+
+    // Verify it's a chroma_database credential
+    if credential.credential_type != "chroma_database" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Credential is not a Chroma database connection" })),
+        ));
+    }
+
+    // Parse credentials
+    let chroma_creds = parse_chroma_credentials(&credential.data).map_err(|e| {
+        tracing::error!("Failed to parse Chroma credentials: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to parse Chroma credentials" })),
+        )
+    })?;
+
+    // First, find the collection by ID to get its current name
+    // Chroma PUT endpoint uses collection ID, but we need the name to fetch it after update
+    let all_collections = ChromaClient::list_collections_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to list Chroma collections: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Failed to list collections: {}", e) })),
+        )
+    })?;
+
+    let existing_collection = all_collections
+        .into_iter()
+        .find(|c| c.id == collection_id)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("Collection with ID {} not found", collection_id) })),
+            )
+        })?;
+
+    // Determine the collection name to use for update (may change if new_name is provided)
+    let collection_name_for_update = payload.new_name
+        .as_ref()
+        .map(|n| n.trim().to_string())
+        .unwrap_or_else(|| existing_collection.name.clone());
+
+    // Convert metadata from serde_json::Map to HashMap if provided
+    let new_metadata = payload.new_metadata.map(|map| {
+        map.into_iter().collect::<std::collections::HashMap<String, serde_json::Value>>()
+    });
+
+    // Create update request
+    let update_request = UpdateCollectionRequest {
+        new_name: payload.new_name.map(|n| n.trim().to_string()),
+        new_metadata,
+        new_configuration: None, // Can be extended later if needed
+    };
+
+    // Update the collection (Chroma PUT uses collection ID in URL, but we pass name to the function)
+    // Note: The function parameter is named 'name' but Chroma API may accept ID
+    let updated_collection_opt = ChromaClient::update_collection_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+        &collection_id, // Using ID as per user's note that PUT uses ID
+        update_request,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to update Chroma collection: {}", e);
+        match e {
+            ChromaError::InvalidApiKey => {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "error": "Invalid API key or authentication failed for the selected database." })),
+                )
+            }
+            ChromaError::ApiError(msg) => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("Chroma API error: {}", msg) })),
+                )
+            }
+            ChromaError::HttpError(msg) => {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({ "error": format!("Failed to connect to Chroma server: {}", msg) })),
+                )
+            }
+            _ => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("Failed to update collection: {}", e) })),
+                )
+            }
+        }
+    })?;
+
+    // If Chroma returned empty response, fetch the collection again using GET with the name
+    let collection = if let Some(c) = updated_collection_opt {
+        c
+    } else {
+        // Fetch the updated collection using GET endpoint (requires name, not ID)
+        ChromaClient::get_collection_v2_with_credentials(
+            &chroma_creds,
+            &chroma_creds.tenant_name,
+            &chroma_creds.database_name,
+            &collection_name_for_update,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch updated Chroma collection: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("Failed to fetch updated collection: {}", e) })),
+            )
+        })?
+    };
+
+    // Emit event for Chroma collection updated
+    let event = Event::new(
+        "integration_chroma_collection_updated",
+        EventPayload::new(json!({
+            "entity_type": "chroma_collection",
+            "entity_id": collection.id,
+            "data": {
+                "name": collection.name,
+                "database_uuid": payload.database_uuid,
+                "tenant_name": chroma_creds.tenant_name,
+                "database_name": chroma_creds.database_name,
+            }
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    state.event_dispatcher.emit(event).await;
+
+    Ok(Json(json!({
+        "id": collection.id,
+        "name": collection.name,
+        "metadata": collection.metadata,
+        "message": "Chroma collection updated successfully"
+    })))
+}
+
+/// Delete a Chroma collection
+///
+/// DELETE /api/integrations/chroma/collections/{collection_id}
+pub async fn delete_chroma_collection(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Extension(org_uuid): Extension<String>,
+    Path(collection_id): Path<String>,
+    Json(payload): Json<DeleteChromaCollectionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&state.db_pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Check permission
+    let has_permission = user_has_permission(
+        &state.db_pool,
+        &claims.user_uuid,
+        &org_uuid,
+        "integration_chroma_can_delete_collection",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Database error" })),
+        )
+    })?;
+
+    if !has_permission {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "User does not have permission to delete Chroma collections"
+            })),
+        ));
+    }
+
+    // Get credentials manager
+    let manager = CredentialsManager::new().map_err(|e| {
+        tracing::error!("Failed to initialize credentials manager: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to initialize credentials manager" })),
+        )
+    })?;
+
+    // Get the database credential
+    let credential = get_credential(
+        &state.db_pool,
+        &manager,
+        &payload.database_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to get credential: {}", e);
+        match e {
+            flextide_core::credentials::CredentialsError::CredentialNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Chroma database connection not found" })),
+            ),
+            flextide_core::credentials::CredentialsError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Permission denied" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to get Chroma database connection" })),
+            ),
+        }
+    })?;
+
+    // Verify it's a chroma_database credential
+    if credential.credential_type != "chroma_database" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Credential is not a Chroma database connection" })),
+        ));
+    }
+
+    // Parse credentials
+    let chroma_creds = parse_chroma_credentials(&credential.data).map_err(|e| {
+        tracing::error!("Failed to parse Chroma credentials: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to parse Chroma credentials" })),
+        )
+    })?;
+
+    // Delete the collection (use collection_id, not name)
+    ChromaClient::delete_collection_v2_with_credentials(
+        &chroma_creds,
+        &chroma_creds.tenant_name,
+        &chroma_creds.database_name,
+        &collection_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to delete Chroma collection: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Failed to delete collection: {}", e) })),
+        )
+    })?;
+
+    // Emit event for Chroma collection deleted
+    let event = Event::new(
+        "integration_chroma_collection_deleted",
+        EventPayload::new(json!({
+            "entity_type": "chroma_collection",
+            "data": {
+                "id": collection_id,
+                "database_uuid": payload.database_uuid,
+                "tenant_name": chroma_creds.tenant_name,
+                "database_name": chroma_creds.database_name,
+            }
+        }))
+    )
+    .with_organization(&org_uuid)
+    .with_user(&claims.user_uuid);
+
+    state.event_dispatcher.emit(event).await;
+
+    Ok(Json(json!({
+        "message": "Chroma collection deleted successfully"
     })))
 }
 

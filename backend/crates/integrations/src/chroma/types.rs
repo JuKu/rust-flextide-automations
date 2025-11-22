@@ -19,13 +19,35 @@ pub struct CreateCollectionRequest {
     pub embedding_function: Option<String>,
 }
 
+/// Request to update a collection
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateCollectionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_metadata: Option<CollectionMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_configuration: Option<serde_json::Value>,
+}
+
 /// Collection information
 #[derive(Debug, Clone, Deserialize)]
 pub struct Collection {
     pub name: String,
     pub id: String,
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_null_as_empty_map")]
     pub metadata: CollectionMetadata,
+}
+
+/// Helper function to deserialize null as empty HashMap
+fn deserialize_null_as_empty_map<'de, D>(deserializer: D) -> Result<CollectionMetadata, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let opt = Option::<CollectionMetadata>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
 }
 
 /// Request to add documents to a collection

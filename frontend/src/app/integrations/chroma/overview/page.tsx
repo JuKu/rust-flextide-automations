@@ -13,9 +13,12 @@ import {
 import { AddChromaDatabaseDialog } from "@/components/integrations/AddChromaDatabaseDialog";
 import { EditChromaDatabaseDialog } from "@/components/integrations/EditChromaDatabaseDialog";
 import { DeleteChromaDatabaseDialog } from "@/components/integrations/DeleteChromaDatabaseDialog";
+import { AddChromaCollectionDialog } from "@/components/integrations/AddChromaCollectionDialog";
+import { EditChromaCollectionDialog } from "@/components/integrations/EditChromaCollectionDialog";
+import { DeleteChromaCollectionDialog } from "@/components/integrations/DeleteChromaCollectionDialog";
 import { hasPermission } from "@/lib/permissions";
 import { getCurrentOrganizationUuid } from "@/lib/organization";
-import { deleteChromaDatabase, getChromaDatabase, testChromaConnection } from "@/lib/api";
+import { deleteChromaDatabase, getChromaDatabase, testChromaConnection, deleteChromaCollection } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 
 export default function ChromaOverviewPage() {
@@ -27,12 +30,20 @@ export default function ChromaOverviewPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isAddCollectionDialogOpen, setIsAddCollectionDialogOpen] = useState(false);
+  const [isEditCollectionDialogOpen, setIsEditCollectionDialogOpen] = useState(false);
+  const [isDeleteCollectionDialogOpen, setIsDeleteCollectionDialogOpen] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<ChromaCollectionInfo | null>(null);
   const [selectedDatabaseUuid, setSelectedDatabaseUuid] = useState<string | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<ChromaDatabaseInfo | null>(null);
   const [canAddDatabase, setCanAddDatabase] = useState(false);
   const [canEditDatabase, setCanEditDatabase] = useState(false);
   const [canDeleteDatabase, setCanDeleteDatabase] = useState(false);
+  const [canAddCollection, setCanAddCollection] = useState(false);
+  const [canEditCollection, setCanEditCollection] = useState(false);
+  const [canDeleteCollection, setCanDeleteCollection] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingCollection, setDeletingCollection] = useState(false);
   const [testingConnection, setTestingConnection] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,14 +55,27 @@ export default function ChromaOverviewPage() {
     const orgUuid = getCurrentOrganizationUuid();
     if (!orgUuid) return;
 
-    const [hasAddPermission, hasEditPermission, hasDeletePermission] = await Promise.all([
+    const [
+      hasAddDbPermission,
+      hasEditDbPermission,
+      hasDeleteDbPermission,
+      hasAddColPermission,
+      hasEditColPermission,
+      hasDeleteColPermission,
+    ] = await Promise.all([
       hasPermission("integration_chroma_can_add_database", orgUuid),
       hasPermission("integration_chroma_can_add_database", orgUuid), // Same permission for edit
       hasPermission("can_delete_credentials", orgUuid),
+      hasPermission("integration_chroma_can_add_collection", orgUuid),
+      hasPermission("integration_chroma_can_edit_collection", orgUuid),
+      hasPermission("integration_chroma_can_delete_collection", orgUuid),
     ]);
-    setCanAddDatabase(hasAddPermission);
-    setCanEditDatabase(hasEditPermission);
-    setCanDeleteDatabase(hasDeletePermission);
+    setCanAddDatabase(hasAddDbPermission);
+    setCanEditDatabase(hasEditDbPermission);
+    setCanDeleteDatabase(hasDeleteDbPermission);
+    setCanAddCollection(hasAddColPermission);
+    setCanEditCollection(hasEditColPermission);
+    setCanDeleteCollection(hasDeleteColPermission);
   }
 
   async function loadData() {
@@ -133,6 +157,43 @@ export default function ChromaOverviewPage() {
       showToast(`Connection test failed for ${db.name}: ${errorMessage}`, "error");
     } finally {
       setTestingConnection(null);
+    }
+  }
+
+  function handleEditCollectionClick(col: ChromaCollectionInfo) {
+    setSelectedCollection(col);
+    setIsEditCollectionDialogOpen(true);
+  }
+
+  function handleEditCollectionSuccess() {
+    setIsEditCollectionDialogOpen(false);
+    setSelectedCollection(null);
+    loadData();
+  }
+
+  function handleDeleteCollectionClick(col: ChromaCollectionInfo) {
+    setSelectedCollection(col);
+    setIsDeleteCollectionDialogOpen(true);
+  }
+
+  async function handleDeleteCollectionConfirm() {
+    if (!selectedCollection) return;
+
+    try {
+      setDeletingCollection(true);
+      await deleteChromaCollection(selectedCollection.id, {
+        database_uuid: selectedCollection.database_uuid,
+      });
+      showToast("Chroma collection deleted successfully", "success");
+      setIsDeleteCollectionDialogOpen(false);
+      setSelectedCollection(null);
+      loadData();
+    } catch (err) {
+      console.error("Failed to delete Chroma collection:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete Chroma collection";
+      showToast(errorMessage, "error");
+    } finally {
+      setDeletingCollection(false);
     }
   }
 
@@ -362,33 +423,46 @@ export default function ChromaOverviewPage() {
 
           {/* Collections Table */}
           <div className="bg-flextide-neutral-panel-bg border border-flextide-neutral-border rounded-lg">
-            <div className="p-4 border-b border-flextide-neutral-border">
+            <div className="p-4 border-b border-flextide-neutral-border flex items-center justify-between">
               <h2 className="text-lg font-semibold text-flextide-neutral-text-dark">
                 Collections
               </h2>
+              {canAddCollection && (
+                <button
+                  className="px-4 py-2 bg-flextide-primary text-white rounded-md hover:bg-flextide-primary-accent transition-colors text-sm"
+                  onClick={() => setIsAddCollectionDialogOpen(true)}
+                >
+                  Add Collection
+                </button>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-flextide-neutral-light-bg">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
-                      Database
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
-                      Tenant
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
-                      Documents
-                    </th>
-                  </tr>
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                        Database
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                        Tenant
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                        Documents
+                      </th>
+                      {(canEditCollection || canDeleteCollection) && (
+                        <th className="px-4 py-3 text-left text-xs font-medium text-flextide-neutral-text-medium uppercase tracking-wider">
+                          Actions
+                        </th>
+                      )}
+                    </tr>
                 </thead>
                 <tbody className="divide-y divide-flextide-neutral-border">
                   {collections.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-flextide-neutral-text-medium">
+                      <td colSpan={canEditCollection || canDeleteCollection ? 5 : 4} className="px-4 py-8 text-center text-flextide-neutral-text-medium">
                         No collections found
                       </td>
                     </tr>
@@ -407,6 +481,56 @@ export default function ChromaOverviewPage() {
                         <td className="px-4 py-3 text-sm text-flextide-neutral-text-medium">
                           {col.document_count}
                         </td>
+                        {(canEditCollection || canDeleteCollection) && (
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              {canEditCollection && (
+                                <button
+                                  onClick={() => handleEditCollectionClick(col)}
+                                  className="p-2 text-flextide-primary-accent hover:bg-flextide-primary-accent/10 rounded-md transition-colors"
+                                  title="Edit collection"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                    />
+                                  </svg>
+                                </button>
+                              )}
+                              {canDeleteCollection && (
+                                <button
+                                  onClick={() => handleDeleteCollectionClick(col)}
+                                  className="p-2 text-flextide-error hover:bg-flextide-error/10 rounded-md transition-colors"
+                                  title="Delete collection"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                    />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -443,7 +567,36 @@ export default function ChromaOverviewPage() {
         database={selectedDatabase}
         loading={deleting}
       />
-    </AppLayout>
-  );
-}
+
+        <AddChromaCollectionDialog
+          isOpen={isAddCollectionDialogOpen}
+          onClose={() => setIsAddCollectionDialogOpen(false)}
+          onSuccess={() => {
+            setIsAddCollectionDialogOpen(false);
+            loadData();
+          }}
+          databases={databases}
+        />
+        <EditChromaCollectionDialog
+          isOpen={isEditCollectionDialogOpen}
+          onClose={() => {
+            setIsEditCollectionDialogOpen(false);
+            setSelectedCollection(null);
+          }}
+          onSuccess={handleEditCollectionSuccess}
+          collection={selectedCollection}
+        />
+        <DeleteChromaCollectionDialog
+          isOpen={isDeleteCollectionDialogOpen}
+          onClose={() => {
+            setIsDeleteCollectionDialogOpen(false);
+            setSelectedCollection(null);
+          }}
+          onConfirm={handleDeleteCollectionConfirm}
+          collection={selectedCollection}
+          loading={deletingCollection}
+        />
+      </AppLayout>
+    );
+  }
 

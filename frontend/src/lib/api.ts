@@ -2640,3 +2640,143 @@ export async function deleteChromaDatabase(uuid: string): Promise<{ message: str
   }
 }
 
+/**
+ * Request to create a new Chroma collection
+ */
+export interface CreateChromaCollectionRequest {
+  database_uuid: string;
+  name: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Create a new Chroma collection
+ */
+export async function createChromaCollection(request: CreateChromaCollectionRequest): Promise<{ id: string; name: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/collections'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/integrations/chroma/collections'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create Chroma collection' }));
+      throw new Error(error.error || 'Failed to create Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to get a Chroma collection
+ */
+export interface GetChromaCollectionResponse {
+  id: string;
+  name: string;
+  metadata: Record<string, any>;
+  database_uuid: string;
+  tenant_name: string;
+  database_name: string;
+}
+
+/**
+ * Get a single Chroma collection
+ */
+export async function getChromaCollection(collectionId: string, databaseUuid: string): Promise<GetChromaCollectionResponse> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}?database_uuid=${encodeURIComponent(databaseUuid)}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get Chroma collection' }));
+      throw new Error(error.error || 'Failed to get Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to update a Chroma collection
+ */
+export interface UpdateChromaCollectionRequest {
+  database_uuid: string;
+  new_name?: string;
+  new_metadata?: Record<string, any>;
+}
+
+/**
+ * Update a Chroma collection
+ */
+export async function updateChromaCollection(collectionId: string, request: UpdateChromaCollectionRequest): Promise<{ id: string; name: string; metadata: Record<string, any>; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update Chroma collection' }));
+      throw new Error(error.error || 'Failed to update Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to delete a Chroma collection
+ */
+export interface DeleteChromaCollectionRequest {
+  database_uuid: string;
+}
+
+/**
+ * Delete a Chroma collection
+ */
+export async function deleteChromaCollection(collectionId: string, request: DeleteChromaCollectionRequest): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to delete Chroma collection' }));
+      throw new Error(error.error || 'Failed to delete Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete Chroma collection:', error);
+    throw error;
+  }
+}
+
