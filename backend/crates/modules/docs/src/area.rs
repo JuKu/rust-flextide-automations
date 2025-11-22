@@ -421,6 +421,49 @@ pub async fn create_area(
         }
     }
 
+    // Add creator as owner member of the area
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_area_members
+                 (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
+                  can_edit_own_pages, can_archive_pages, can_archive_own_pages,
+                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
+                 VALUES (?, ?, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+            )
+            .bind(&area_uuid)
+            .bind(user_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_area_members
+                 (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
+                  can_edit_own_pages, can_archive_pages, can_archive_own_pages,
+                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
+                 VALUES ($1, $2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+            )
+            .bind(&area_uuid)
+            .bind(user_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_area_members
+                 (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
+                  can_edit_own_pages, can_archive_pages, can_archive_own_pages,
+                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
+                 VALUES (?1, ?2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+            )
+            .bind(&area_uuid)
+            .bind(user_uuid)
+            .execute(p)
+            .await?;
+        }
+    }
+
     // Emit area created event
     if let Some(disp) = dispatcher {
         let area = load_area_by_uuid(pool, &area_uuid).await.ok();
@@ -588,6 +631,12 @@ pub async fn update_area(
                 query = query.bind(v);
             }
             if let Some(ref v) = request.icon_name {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.color_hex {
+                query = query.bind(v);
+            }
+            if let Some(ref v) = request.topics {
                 query = query.bind(v);
             }
             if let Some(v) = request.public {

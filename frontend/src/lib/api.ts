@@ -1079,6 +1079,38 @@ export interface IntegrationDetail {
   pricing_type: "free" | "one_time" | "subscription";
 }
 
+export interface ChromaStatistics {
+  configured_databases: number;
+  total_collections: number;
+  total_documents: number;
+}
+
+export interface ChromaDatabaseInfo {
+  uuid: string;
+  name: string;
+  base_url: string;
+  tenant_name: string;
+  database_name: string;
+  secured_mode: boolean;
+}
+
+export interface ChromaCollectionInfo {
+  id: string;
+  name: string;
+  database_uuid: string;
+  database_name: string;
+  tenant_name: string;
+  document_count: number;
+}
+
+export interface ChromaDatabasesResponse {
+  databases: ChromaDatabaseInfo[];
+}
+
+export interface ChromaCollectionsResponse {
+  collections: ChromaCollectionInfo[];
+}
+
 export interface IntegrationsListResponse {
   integrations: IntegrationDetail[];
   total: number;
@@ -1452,6 +1484,240 @@ export async function deleteWebhook(webhookId: string): Promise<{ message: strin
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to delete webhook:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// Credentials API
+// ============================================================================
+
+export interface Credential {
+  uuid: string;
+  organization_uuid: string;
+  name: string;
+  credential_type: string;
+  creator_user_uuid: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CredentialWithData extends Credential {
+  data: any;
+}
+
+export interface CreateCredentialRequest {
+  name: string;
+  credential_type: string;
+  data: any;
+}
+
+export interface UpdateCredentialRequest {
+  name?: string;
+  data?: any; // If not provided or null, keeps the old value
+}
+
+/**
+ * List all credentials for the current organization (without values)
+ */
+export async function listCredentials(): Promise<Credential[]> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/credentials'), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch credentials:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a credential by UUID (with decrypted data)
+ */
+export async function getCredential(credentialUuid: string): Promise<CredentialWithData> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to fetch credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new credential
+ */
+export async function createCredential(request: CreateCredentialRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint('/api/credentials'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing credential
+ */
+export async function updateCredential(
+  credentialUuid: string,
+  request: UpdateCredentialRequest
+): Promise<{ message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update credential:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a credential
+ */
+export async function deleteCredential(credentialUuid: string): Promise<{ message: string }> {
+  try {
+    const token = getToken();
+    const orgUuid = getCurrentOrganizationUuid();
+
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!orgUuid) {
+      throw new Error('No organization selected');
+    }
+
+    const response = await fetch(getApiEndpoint(`/api/credentials/${credentialUuid}`), {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'X-Organization-UUID': orgUuid,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete credential:', error);
     throw error;
   }
 }
@@ -2068,6 +2334,448 @@ export async function executeBackupJob(uuid: string): Promise<void> {
   } catch (error) {
     handleNetworkError(error);
     console.error('Failed to execute backup job:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get Chroma integration statistics
+ */
+export async function getChromaStatistics(): Promise<ChromaStatistics> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/statistics'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/statistics'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get Chroma statistics' }));
+      throw new Error(error.error || 'Failed to get Chroma statistics');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get Chroma statistics:', error);
+    throw error;
+  }
+}
+
+/**
+ * List all configured Chroma databases
+ */
+export async function listChromaDatabases(): Promise<ChromaDatabasesResponse> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/databases'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/databases'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list Chroma databases' }));
+      throw new Error(error.error || 'Failed to list Chroma databases');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list Chroma databases:', error);
+    throw error;
+  }
+}
+
+/**
+ * List all Chroma collections accessible to this organization
+ */
+export async function listChromaCollections(): Promise<ChromaCollectionsResponse> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/collections'), {
+      method: 'GET',
+      headers: getApiHeaders('/api/integrations/chroma/collections'),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to list Chroma collections' }));
+      throw new Error(error.error || 'Failed to list Chroma collections');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list Chroma collections:', error);
+    throw error;
+  }
+}
+
+/**
+ * Chroma credentials structure
+ */
+export interface ChromaCredentials {
+  base_url: string;
+  secured_mode: boolean;
+  auth_method: string;
+  token_transport_header: string;
+  token_prefix: string;
+  auth_token: string;
+  tenant_name: string;
+  database_name: string;
+  additional_headers: Array<[string, string]>;
+  api_version: string;
+}
+
+/**
+ * Request to create a new Chroma database connection
+ */
+export interface CreateChromaDatabaseRequest {
+  name: string;
+  credentials: ChromaCredentials;
+}
+
+/**
+ * Request to test a Chroma database connection
+ */
+export interface TestChromaConnectionRequest {
+  credentials: ChromaCredentials;
+}
+
+/**
+ * Test Chroma database connection
+ */
+export async function testChromaConnection(request: TestChromaConnectionRequest): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/test-connection'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/integrations/chroma/test-connection'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      // Try to parse as JSON first
+      let errorMessage = 'Failed to test connection';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+        
+        // If error message contains JSON, try to parse it
+        if (typeof errorMessage === 'string' && errorMessage.includes('{') && errorMessage.includes('}')) {
+          try {
+            const nestedError = JSON.parse(errorMessage);
+            if (nestedError.message) {
+              errorMessage = nestedError.message;
+            } else if (nestedError.error) {
+              errorMessage = nestedError.error;
+            }
+          } catch {
+            // If parsing fails, use the original error message
+          }
+        }
+      } catch {
+        // If JSON parsing fails, try to get text response
+        try {
+          const text = await response.text();
+          // Check if it's an HTML error page
+          if (text.includes('<html>') || text.includes('<!DOCTYPE')) {
+            // Extract meaningful error from status code
+            if (response.status === 403) {
+              errorMessage = 'Invalid API key or authentication failed. Please check your credentials.';
+            } else if (response.status === 401) {
+              errorMessage = 'Authentication failed. Please check your API key.';
+            } else if (response.status === 404) {
+              errorMessage = 'Chroma server not found. Please check the base URL.';
+            } else {
+              errorMessage = `Connection failed: ${response.status} ${response.statusText}`;
+            }
+          } else {
+            // Use the text as error message if it's not HTML
+            errorMessage = text || errorMessage;
+          }
+        } catch {
+          // If all parsing fails, use status-based message
+          if (response.status === 403) {
+            errorMessage = 'Invalid API key or authentication failed. Please check your credentials.';
+          } else if (response.status === 401) {
+            errorMessage = 'Authentication failed. Please check your API key.';
+          } else if (response.status === 404) {
+            errorMessage = 'Chroma server not found. Please check the base URL.';
+          } else {
+            errorMessage = `Connection failed: ${response.status} ${response.statusText}`;
+          }
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    // Re-throw the error with the user-friendly message
+    throw error;
+  }
+}
+
+/**
+ * Create a new Chroma database connection
+ */
+export async function createChromaDatabase(request: CreateChromaDatabaseRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/databases'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/integrations/chroma/databases'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create Chroma database' }));
+      throw new Error(error.error || 'Failed to create Chroma database');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create Chroma database:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to update a Chroma database connection
+ */
+export interface UpdateChromaDatabaseRequest {
+  name: string;
+  credentials: ChromaCredentials;
+}
+
+/**
+ * Response from getting a Chroma database connection
+ */
+export interface GetChromaDatabaseResponse {
+  uuid: string;
+  name: string;
+  credentials: ChromaCredentials;
+}
+
+/**
+ * Get a single Chroma database connection with full credentials
+ */
+export async function getChromaDatabase(uuid: string): Promise<GetChromaDatabaseResponse> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/databases/${uuid}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/integrations/chroma/databases/${uuid}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get Chroma database' }));
+      throw new Error(error.error || 'Failed to get Chroma database');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get Chroma database:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update a Chroma database connection
+ */
+export async function updateChromaDatabase(uuid: string, request: UpdateChromaDatabaseRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/databases/${uuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/integrations/chroma/databases/${uuid}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update Chroma database' }));
+      throw new Error(error.error || 'Failed to update Chroma database');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update Chroma database:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a Chroma database connection
+ */
+export async function deleteChromaDatabase(uuid: string): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/databases/${uuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/integrations/chroma/databases/${uuid}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to delete Chroma database' }));
+      throw new Error(error.error || 'Failed to delete Chroma database');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete Chroma database:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to create a new Chroma collection
+ */
+export interface CreateChromaCollectionRequest {
+  database_uuid: string;
+  name: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Create a new Chroma collection
+ */
+export async function createChromaCollection(request: CreateChromaCollectionRequest): Promise<{ id: string; name: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint('/api/integrations/chroma/collections'), {
+      method: 'POST',
+      headers: getApiHeaders('/api/integrations/chroma/collections'),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create Chroma collection' }));
+      throw new Error(error.error || 'Failed to create Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to get a Chroma collection
+ */
+export interface GetChromaCollectionResponse {
+  id: string;
+  name: string;
+  metadata: Record<string, any>;
+  database_uuid: string;
+  tenant_name: string;
+  database_name: string;
+}
+
+/**
+ * Get a single Chroma collection
+ */
+export async function getChromaCollection(collectionId: string, databaseUuid: string): Promise<GetChromaCollectionResponse> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}?database_uuid=${encodeURIComponent(databaseUuid)}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get Chroma collection' }));
+      throw new Error(error.error || 'Failed to get Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to update a Chroma collection
+ */
+export interface UpdateChromaCollectionRequest {
+  database_uuid: string;
+  new_name?: string;
+  new_metadata?: Record<string, any>;
+}
+
+/**
+ * Update a Chroma collection
+ */
+export async function updateChromaCollection(collectionId: string, request: UpdateChromaCollectionRequest): Promise<{ id: string; name: string; metadata: Record<string, any>; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update Chroma collection' }));
+      throw new Error(error.error || 'Failed to update Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update Chroma collection:', error);
+    throw error;
+  }
+}
+
+/**
+ * Request to delete a Chroma collection
+ */
+export interface DeleteChromaCollectionRequest {
+  database_uuid: string;
+}
+
+/**
+ * Delete a Chroma collection
+ */
+export async function deleteChromaCollection(collectionId: string, request: DeleteChromaCollectionRequest): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/integrations/chroma/collections/${encodeURIComponent(collectionId)}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to delete Chroma collection' }));
+      throw new Error(error.error || 'Failed to delete Chroma collection');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete Chroma collection:', error);
     throw error;
   }
 }

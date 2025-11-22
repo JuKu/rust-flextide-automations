@@ -7,7 +7,7 @@ use flextide_core::database::{DatabaseError, DatabasePool};
 use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value as JsonValue};
 use sqlx::Row;
 use thiserror::Error;
 
@@ -60,6 +60,10 @@ pub struct DocsPage {
     pub page_type: String,
     pub last_updated: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    pub auto_sync_to_vector_db: i32,
+    pub vcs_export_allowed: i32,
+    pub includes_private_data: i32,
+    pub metadata: Option<JsonValue>,
 }
 
 /// Request structure for creating a new page
@@ -97,6 +101,10 @@ pub struct DocsPageWithVersion {
     pub page_type: String,
     pub last_updated: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    pub auto_sync_to_vector_db: i32,
+    pub vcs_export_allowed: i32,
+    pub includes_private_data: i32,
+    pub metadata: Option<JsonValue>,
     pub version: Option<DocsPageVersion>,
 }
 
@@ -110,7 +118,8 @@ async fn load_page_by_uuid(
         DatabasePool::MySql(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                 current_version_uuid, page_type, last_updated, created_at
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
                  FROM module_docs_pages WHERE uuid = ?",
             )
             .bind(page_uuid)
@@ -130,6 +139,10 @@ async fn load_page_by_uuid(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 }),
                 None => Err(DocsPageDatabaseError::PageNotFound),
             }
@@ -137,7 +150,8 @@ async fn load_page_by_uuid(
         DatabasePool::Postgres(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                 current_version_uuid, page_type, last_updated, created_at
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
                  FROM module_docs_pages WHERE uuid = $1",
             )
             .bind(page_uuid)
@@ -157,6 +171,10 @@ async fn load_page_by_uuid(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 }),
                 None => Err(DocsPageDatabaseError::PageNotFound),
             }
@@ -164,7 +182,8 @@ async fn load_page_by_uuid(
         DatabasePool::Sqlite(p) => {
             let row = sqlx::query(
                 "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                 current_version_uuid, page_type, last_updated, created_at
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
                  FROM module_docs_pages WHERE uuid = ?1",
             )
             .bind(page_uuid)
@@ -184,6 +203,10 @@ async fn load_page_by_uuid(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 }),
                 None => Err(DocsPageDatabaseError::PageNotFound),
             }
@@ -783,7 +806,8 @@ pub async fn list_pages(
             let pages = if let Some(folder) = folder_uuid {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = ? AND area_uuid = ? AND folder_uuid = ?
                      ORDER BY created_at DESC",
@@ -796,7 +820,8 @@ pub async fn list_pages(
             } else {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = ? AND area_uuid = ? AND folder_uuid IS NULL
                      ORDER BY created_at DESC",
@@ -821,6 +846,10 @@ pub async fn list_pages(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 })
                 .collect())
         }
@@ -828,7 +857,8 @@ pub async fn list_pages(
             let pages = if let Some(folder) = folder_uuid {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = $1 AND area_uuid = $2 AND folder_uuid = $3
                      ORDER BY created_at DESC",
@@ -841,7 +871,8 @@ pub async fn list_pages(
             } else {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = $1 AND area_uuid = $2 AND folder_uuid IS NULL
                      ORDER BY created_at DESC",
@@ -866,6 +897,10 @@ pub async fn list_pages(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 })
                 .collect())
         }
@@ -873,7 +908,8 @@ pub async fn list_pages(
             let pages = if let Some(folder) = folder_uuid {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = ?1 AND area_uuid = ?2 AND folder_uuid = ?3
                      ORDER BY created_at DESC",
@@ -886,7 +922,8 @@ pub async fn list_pages(
             } else {
                 sqlx::query(
                     "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
-                     current_version_uuid, page_type, last_updated, created_at
+                     current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                     vcs_export_allowed, includes_private_data, metadata
                      FROM module_docs_pages
                      WHERE organization_uuid = ?1 AND area_uuid = ?2 AND folder_uuid IS NULL
                      ORDER BY created_at DESC",
@@ -911,6 +948,10 @@ pub async fn list_pages(
                     page_type: row.get("page_type"),
                     last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
                 })
                 .collect())
         }
@@ -1076,6 +1117,10 @@ pub async fn load_page_with_version(
         page_type: page.page_type,
         last_updated: page.last_updated,
         created_at: page.created_at,
+        auto_sync_to_vector_db: page.auto_sync_to_vector_db,
+        vcs_export_allowed: page.vcs_export_allowed,
+        includes_private_data: page.includes_private_data,
+        metadata: page.metadata,
         version,
     })
 }

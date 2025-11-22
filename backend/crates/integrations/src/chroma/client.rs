@@ -8,7 +8,7 @@ use reqwest::Client;
 use tracing::{debug, error, info};
 
 const DEFAULT_CHROMA_BASE_URL: &str = "http://localhost:8000";
-const CHROMA_API_VERSION: &str = "v1";
+const CHROMA_API_VERSION: &str = "v2";
 
 /// Client for interacting with the Chroma vector database REST API
 pub struct ChromaClient {
@@ -45,8 +45,24 @@ impl ChromaClient {
         }
     }
 
-    /// Build the API URL for a given endpoint
-    fn api_url(&self, endpoint: &str) -> String {
+    /// Build the API URL for a given endpoint (API v2 with tenant/database)
+    fn api_url(&self, tenant: &str, database: &str, endpoint: &str) -> String {
+        format!(
+            "{}/api/{}/tenants/{}/databases/{}/{}",
+            self.base_url, CHROMA_API_VERSION, tenant, database, endpoint
+        )
+    }
+
+    /// Build the API URL for a tenant-specific endpoint
+    fn tenant_api_url(&self, tenant: &str, _endpoint: &str) -> String {
+        format!(
+            "{}/api/{}/tenants/{}",
+            self.base_url, CHROMA_API_VERSION, tenant
+        )
+    }
+
+    /// Build the API URL for a general v2 endpoint (without tenant/database)
+    fn v2_api_url(&self, endpoint: &str) -> String {
         format!("{}/api/{}/{}", self.base_url, CHROMA_API_VERSION, endpoint)
     }
 
@@ -62,6 +78,57 @@ impl ChromaClient {
             // Chroma uses X-Chroma-Token header for authentication
             let header_name = reqwest::header::HeaderName::from_static("x-chroma-token");
             if let Ok(header_value) = api_key.parse() {
+                headers.insert(header_name, header_value);
+            }
+        }
+
+        headers
+    }
+
+    /// Build request headers from ChromaCredentials
+    pub fn build_headers_from_credentials(creds: &crate::chroma::types::ChromaCredentials) -> reqwest::header::HeaderMap {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+
+        // Add authentication header based on credentials
+        if creds.auth_method == "token" && !creds.auth_token.is_empty() {
+            let header_name = if creds.token_transport_header.to_lowercase() == "authorization" {
+                reqwest::header::AUTHORIZATION
+            } else {
+                // Try to parse custom header name
+                reqwest::header::HeaderName::try_from(creds.token_transport_header.as_str())
+                    .unwrap_or_else(|_| reqwest::header::HeaderName::from_static("x-chroma-token"))
+            };
+
+            let header_value = if creds.token_transport_header.to_lowercase() == "authorization" {
+                format!("{}{}", creds.token_prefix, creds.auth_token)
+            } else {
+                creds.auth_token.clone()
+            };
+
+            if let Ok(value) = header_value.parse() {
+                headers.insert(header_name, value);
+            }
+        } else if creds.auth_method == "basic_auth" && !creds.auth_token.is_empty() {
+            // For basic_auth, auth_token should be in format "username:password"
+            // We'll encode it as Basic Auth header
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&creds.auth_token);
+            let header_value = format!("Basic {}", encoded);
+            if let Ok(value) = header_value.parse() {
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+            }
+        }
+
+        // Add additional headers
+        for (key, value) in &creds.additional_headers {
+            if let (Ok(header_name), Ok(header_value)) = (
+                reqwest::header::HeaderName::try_from(key.as_str()),
+                value.parse(),
+            ) {
                 headers.insert(header_name, header_value);
             }
         }
@@ -85,12 +152,14 @@ impl ChromaClient {
         }
     }
 
-    /// Create a new collection
-    pub async fn create_collection(
+    /// Create a new collection (API v2 - requires tenant and database)
+    pub async fn create_collection_v2(
         &self,
+        tenant: &str,
+        database: &str,
         request: CreateCollectionRequest,
     ) -> Result<Collection, ChromaError> {
-        let url = self.api_url("collections");
+        let url = self.api_url(tenant, database, "collections");
 
         debug!("Creating Chroma collection: {}", request.name);
 
@@ -116,9 +185,9 @@ impl ChromaClient {
         Ok(collection)
     }
 
-    /// Get a collection by name
-    pub async fn get_collection(&self, name: &str) -> Result<Collection, ChromaError> {
-        let url = self.api_url(&format!("collections/{}", name));
+    /// Get a collection by name (API v2 - requires tenant and database)
+    pub async fn get_collection(&self, tenant: &str, database: &str, name: &str) -> Result<Collection, ChromaError> {
+        let url = self.api_url(tenant, database, &format!("collections/{}", name));
 
         debug!("Getting Chroma collection: {}", name);
 
@@ -141,9 +210,9 @@ impl ChromaClient {
         Ok(collection)
     }
 
-    /// List all collections
-    pub async fn list_collections(&self) -> Result<Vec<Collection>, ChromaError> {
-        let url = self.api_url("collections");
+    /// List all collections (API v2 - requires tenant and database)
+    pub async fn list_collections(&self, tenant: &str, database: &str) -> Result<Vec<Collection>, ChromaError> {
+        let url = self.api_url(tenant, database, "collections");
 
         debug!("Listing Chroma collections");
 
@@ -168,9 +237,45 @@ impl ChromaClient {
         Ok(collections)
     }
 
-    /// Delete a collection
-    pub async fn delete_collection(&self, name: &str) -> Result<(), ChromaError> {
-        let url = self.api_url(&format!("collections/{}", name));
+    /// Update a collection (API v2 - requires tenant and database)
+    /// 
+    /// PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection}
+    pub async fn update_collection(
+        &self,
+        tenant: &str,
+        database: &str,
+        name: &str,
+        request: UpdateCollectionRequest,
+    ) -> Result<Collection, ChromaError> {
+        let url = self.api_url(tenant, database, &format!("collections/{}", name));
+
+        debug!("Updating Chroma collection: {}", name);
+
+        let response = self
+            .client
+            .put(&url)
+            .headers(self.build_headers())
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(self.handle_error(status, error_text));
+        }
+
+        let collection: Collection = response.json().await?;
+
+        info!("Collection updated successfully: {}", collection.name);
+
+        Ok(collection)
+    }
+
+    /// Delete a collection (API v2 - requires tenant and database)
+    pub async fn delete_collection(&self, tenant: &str, database: &str, name: &str) -> Result<(), ChromaError> {
+        let url = self.api_url(tenant, database, &format!("collections/{}", name));
 
         debug!("Deleting Chroma collection: {}", name);
 
@@ -193,13 +298,15 @@ impl ChromaClient {
         Ok(())
     }
 
-    /// Add documents to a collection
+    /// Add documents to a collection (API v2 - requires tenant and database)
     pub async fn add_documents(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         request: AddDocumentsRequest,
     ) -> Result<(), ChromaError> {
-        let url = self.api_url(&format!("collections/{}/add", collection_name));
+        let url = self.api_url(tenant, database, &format!("collections/{}/add", collection_name));
 
         debug!(
             "Adding {} documents to collection: {}",
@@ -227,13 +334,15 @@ impl ChromaClient {
         Ok(())
     }
 
-    /// Update documents in a collection
+    /// Update documents in a collection (API v2 - requires tenant and database)
     pub async fn update_documents(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         request: UpdateDocumentsRequest,
     ) -> Result<(), ChromaError> {
-        let url = self.api_url(&format!("collections/{}/update", collection_name));
+        let url = self.api_url(tenant, database, &format!("collections/{}/update", collection_name));
 
         debug!(
             "Updating {} documents in collection: {}",
@@ -261,13 +370,15 @@ impl ChromaClient {
         Ok(())
     }
 
-    /// Delete documents from a collection
+    /// Delete documents from a collection (API v2 - requires tenant and database)
     pub async fn delete_documents(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         request: DeleteDocumentsRequest,
     ) -> Result<(), ChromaError> {
-        let url = self.api_url(&format!("collections/{}/delete", collection_name));
+        let url = self.api_url(tenant, database, &format!("collections/{}/delete", collection_name));
 
         debug!("Deleting documents from collection: {}", collection_name);
 
@@ -291,13 +402,15 @@ impl ChromaClient {
         Ok(())
     }
 
-    /// Query a collection for similar documents
+    /// Query a collection for similar documents (API v2 - requires tenant and database)
     pub async fn query(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         request: QueryRequest,
     ) -> Result<QueryResult, ChromaError> {
-        let url = self.api_url(&format!("collections/{}/query", collection_name));
+        let url = self.api_url(tenant, database, &format!("collections/{}/query", collection_name));
 
         debug!("Querying collection: {}", collection_name);
 
@@ -326,13 +439,15 @@ impl ChromaClient {
         Ok(result)
     }
 
-    /// Get documents from a collection
+    /// Get documents from a collection (API v2 - requires tenant and database)
     pub async fn get_documents(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         request: GetDocumentsRequest,
     ) -> Result<GetDocumentsResult, ChromaError> {
-        let url = self.api_url(&format!("collections/{}/get", collection_name));
+        let url = self.api_url(tenant, database, &format!("collections/{}/get", collection_name));
 
         debug!("Getting documents from collection: {}", collection_name);
 
@@ -358,9 +473,9 @@ impl ChromaClient {
         Ok(result)
     }
 
-    /// Count documents in a collection
-    pub async fn count(&self, collection_name: &str) -> Result<usize, ChromaError> {
-        let url = self.api_url(&format!("collections/{}/count", collection_name));
+    /// Count documents in a collection (API v2 - requires tenant and database)
+    pub async fn count(&self, tenant: &str, database: &str, collection_name: &str) -> Result<usize, ChromaError> {
+        let url = self.api_url(tenant, database, &format!("collections/{}/count", collection_name));
 
         debug!("Counting documents in collection: {}", collection_name);
 
@@ -386,13 +501,15 @@ impl ChromaClient {
         Ok(result.count)
     }
 
-    /// Peek at documents in a collection (get sample)
+    /// Peek at documents in a collection (get sample) (API v2 - requires tenant and database)
     pub async fn peek(
         &self,
+        tenant: &str,
+        database: &str,
         collection_name: &str,
         limit: Option<usize>,
     ) -> Result<PeekResult, ChromaError> {
-        let mut url = self.api_url(&format!("collections/{}/peek", collection_name));
+        let mut url = self.api_url(tenant, database, &format!("collections/{}/peek", collection_name));
 
         if let Some(limit) = limit {
             url = format!("{}?limit={}", url, limit);
@@ -417,6 +534,499 @@ impl ChromaClient {
         let result: PeekResult = response.json().await?;
 
         Ok(result)
+    }
+
+    /// Check if a tenant exists
+    /// 
+    /// GET /api/v2/tenants/{tenant_name}
+    pub async fn tenant_exists(&self, tenant_name: &str) -> Result<bool, ChromaError> {
+        let url = self.tenant_api_url(tenant_name, "");
+
+        debug!("Checking if tenant exists: {}", tenant_name);
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(self.build_headers())
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        match status.as_u16() {
+            200 => Ok(true),
+            404 => Ok(false),
+            _ => {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                Err(self.handle_error(status, error_text))
+            }
+        }
+    }
+
+    /// Get user identity (returns available tenants and databases)
+    /// 
+    /// GET /api/v2/auth/identity
+    pub async fn get_user_identity(&self) -> Result<serde_json::Value, ChromaError> {
+        let url = self.v2_api_url("auth/identity");
+
+        debug!("Getting user identity");
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(self.build_headers())
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(self.handle_error(status, error_text));
+        }
+
+        let identity: serde_json::Value = response.json().await?;
+        Ok(identity)
+    }
+
+    /// List collections for a tenant/database (API v2)
+    /// 
+    /// GET /api/v2/tenants/{tenant}/databases/{database}/collections
+    pub async fn list_collections_v2(
+        &self,
+        tenant: &str,
+        database: &str,
+    ) -> Result<Vec<Collection>, ChromaError> {
+        let url = self.api_url(tenant, database, "collections");
+
+        debug!("Listing Chroma collections for tenant={}, database={}", tenant, database);
+
+        let response = self
+            .client
+            .get(&url)
+            .headers(self.build_headers())
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(self.handle_error(status, error_text));
+        }
+
+        let collections: Vec<Collection> = response.json().await?;
+
+        info!("Found {} collections", collections.len());
+
+        Ok(collections)
+    }
+
+    /// List collections for a tenant/database using credentials (API v2)
+    /// 
+    /// GET /api/v2/tenants/{tenant}/databases/{database}/collections
+    pub async fn list_collections_v2_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant: &str,
+        database: &str,
+    ) -> Result<Vec<Collection>, ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}/databases/{}/collections",
+            creds.base_url, creds.api_version, tenant, database
+        );
+
+        debug!("Listing Chroma collections for tenant={}, database={}", tenant, database);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Self::handle_error_static(status, error_text));
+        }
+
+        let collections: Vec<Collection> = response.json().await?;
+
+        info!("Found {} collections", collections.len());
+
+        Ok(collections)
+    }
+
+    /// Check if a tenant exists using credentials
+    /// 
+    /// GET /api/v2/tenants/{tenant_name}
+    pub async fn tenant_exists_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant_name: &str,
+    ) -> Result<bool, ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}",
+            creds.base_url, creds.api_version, tenant_name
+        );
+
+        debug!("Checking if tenant exists: {}", tenant_name);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        match status.as_u16() {
+            200 => Ok(true),
+            404 => Ok(false),
+            _ => {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                Err(Self::handle_error_static(status, error_text))
+            }
+        }
+    }
+
+    /// Create a new collection using credentials (API v2 - requires tenant and database)
+    /// 
+    /// POST /api/v2/tenants/{tenant}/databases/{database}/collections
+    pub async fn create_collection_v2_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant: &str,
+        database: &str,
+        request: CreateCollectionRequest,
+    ) -> Result<Collection, ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}/databases/{}/collections",
+            creds.base_url, creds.api_version, tenant, database
+        );
+
+        debug!("Creating Chroma collection: {} for tenant={}, database={}", request.name, tenant, database);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        
+        // Get response text to see what we actually got
+        let response_text = response.text().await?;
+        
+        info!("Chroma create collection response (status {}): {}", status, response_text);
+
+        if !status.is_success() {
+            return Err(Self::handle_error_static(status, response_text));
+        }
+
+        // Try to parse as Collection
+        let collection: Collection = match serde_json::from_str(&response_text) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Failed to parse collection response: {}. Response body: {}", e, response_text);
+                return Err(ChromaError::InvalidResponse(format!(
+                    "Failed to parse collection response: {}. Response: {}",
+                    e, response_text
+                )));
+            }
+        };
+
+        info!("Collection created successfully: {}", collection.name);
+
+        Ok(collection)
+    }
+
+    /// Update a collection using credentials (API v2 - requires tenant and database)
+    /// 
+    /// PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection}
+    pub async fn update_collection_v2_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant: &str,
+        database: &str,
+        name: &str,
+        request: UpdateCollectionRequest,
+    ) -> Result<Option<Collection>, ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}/databases/{}/collections/{}",
+            creds.base_url, creds.api_version, tenant, database, name
+        );
+
+        debug!("Updating Chroma collection: {} for tenant={}, database={}", name, tenant, database);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .put(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        
+        // Get response text to see what we actually got
+        let response_text = response.text().await?;
+        
+        debug!("Chroma update collection response (status {}): {}", status, response_text);
+
+        if !status.is_success() {
+            return Err(Self::handle_error_static(status, response_text));
+        }
+
+        // Chroma PUT endpoint may return empty object {} instead of Collection
+        // If response is empty or invalid, return None to indicate we need to fetch it separately
+        let collection: Option<Collection> = if response_text.trim().is_empty() || response_text == "{}" {
+            debug!("Chroma update returned empty response, will fetch collection separately");
+            None
+        } else {
+            match serde_json::from_str(&response_text) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    debug!("Failed to parse collection response (may be empty): {}. Response body: {}", e, response_text);
+                    None
+                }
+            }
+        };
+
+        if let Some(ref c) = collection {
+            info!("Collection updated successfully: {}", c.name);
+        } else {
+            info!("Collection update successful (empty response, will fetch separately)");
+        }
+
+        Ok(collection)
+    }
+
+    /// Delete a collection using credentials (API v2 - requires tenant and database)
+    /// 
+    /// DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection}
+    pub async fn delete_collection_v2_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant: &str,
+        database: &str,
+        name: &str,
+    ) -> Result<(), ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}/databases/{}/collections/{}",
+            creds.base_url, creds.api_version, tenant, database, name
+        );
+
+        debug!("Deleting Chroma collection: {} for tenant={}, database={}", name, tenant, database);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .delete(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Self::handle_error_static(status, error_text));
+        }
+
+        info!("Collection deleted successfully: {}", name);
+
+        Ok(())
+    }
+
+    /// Get a collection by name using credentials (API v2 - requires tenant and database)
+    /// 
+    /// GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection}
+    pub async fn get_collection_v2_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+        tenant: &str,
+        database: &str,
+        name: &str,
+    ) -> Result<Collection, ChromaError> {
+        let client = Client::new();
+        let url = format!(
+            "{}/api/{}/tenants/{}/databases/{}/collections/{}",
+            creds.base_url, creds.api_version, tenant, database, name
+        );
+
+        debug!("Getting Chroma collection: {} for tenant={}, database={}", name, tenant, database);
+
+        let headers = Self::build_headers_from_credentials(creds);
+
+        let response = client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Self::handle_error_static(status, error_text));
+        }
+
+        // Get response text to handle null metadata
+        let response_text = response.text().await?;
+        
+        // Try to parse as Collection
+        let collection: Collection = match serde_json::from_str(&response_text) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Failed to parse collection response: {}. Response body: {}", e, response_text);
+                return Err(ChromaError::InvalidResponse(format!(
+                    "Failed to parse collection response: {}. Response: {}",
+                    e, response_text
+                )));
+            }
+        };
+
+        Ok(collection)
+    }
+
+    /// Test connection to Chroma server and verify tenant/database access
+    /// 
+    /// This method:
+    /// 1. Checks if the tenant exists by calling GET /api/{version}/tenants/{tenant}
+    /// 2. If database is provided, checks if the database exists by calling GET /api/{version}/tenants/{tenant}/databases/{database}
+    ///    Otherwise, lists databases by calling GET /api/{version}/tenants/{tenant}/databases
+    pub async fn test_connection_with_credentials(
+        creds: &crate::chroma::types::ChromaCredentials,
+    ) -> Result<(), ChromaError> {
+        let client = Client::new();
+        
+        // Step 1: Check if tenant exists
+        let tenant_url = format!(
+            "{}/api/{}/tenants/{}",
+            creds.base_url, creds.api_version, creds.tenant_name
+        );
+        
+        debug!("Testing Chroma connection: checking tenant {}", creds.tenant_name);
+        
+        let headers = Self::build_headers_from_credentials(creds);
+        
+        let response = client
+            .get(&tenant_url)
+            .headers(headers.clone())
+            .send()
+            .await?;
+        
+        let status = response.status();
+        
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Self::handle_error_static(status, error_text));
+        }
+        
+        // Step 2: Check database if provided
+        if !creds.database_name.is_empty() {
+            let db_url = format!(
+                "{}/api/{}/tenants/{}/databases/{}",
+                creds.base_url, creds.api_version, creds.tenant_name, creds.database_name
+            );
+            
+            debug!("Testing Chroma connection: checking database {}", creds.database_name);
+            
+            let db_response = client
+                .get(&db_url)
+                .headers(headers)
+                .send()
+                .await?;
+            
+            let db_status = db_response.status();
+            
+            if !db_status.is_success() {
+                let error_text = db_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Self::handle_error_static(db_status, error_text));
+            }
+        } else {
+            // If no database name, try to list databases
+            let db_list_url = format!(
+                "{}/api/{}/tenants/{}/databases",
+                creds.base_url, creds.api_version, creds.tenant_name
+            );
+            
+            debug!("Testing Chroma connection: listing databases");
+            
+            let db_response = client
+                .get(&db_list_url)
+                .headers(headers)
+                .send()
+                .await?;
+            
+            let db_status = db_response.status();
+            
+            if !db_status.is_success() {
+                let error_text = db_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Self::handle_error_static(db_status, error_text));
+            }
+        }
+        
+        info!("Chroma connection test successful");
+        Ok(())
+    }
+
+    /// Static version of handle_error for use in static methods
+    fn handle_error_static(status: reqwest::StatusCode, error_text: String) -> ChromaError {
+        error!("Chroma API error: status={}, body={}", status, error_text);
+
+        match status.as_u16() {
+            401 => ChromaError::InvalidApiKey,
+            404 => {
+                // Try to parse JSON error response from Chroma
+                let parsed_msg = if error_text.trim_start().starts_with('{') {
+                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&error_text) {
+                        if let Some(message) = json_value.get("message").and_then(|v| v.as_str()) {
+                            message.to_string()
+                        } else if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
+                            error.to_string()
+                        } else {
+                            error_text
+                        }
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                };
+                ChromaError::CollectionNotFound(parsed_msg)
+            }
+            409 => {
+                // Try to parse JSON error response from Chroma to extract collection name
+                let parsed_msg = if error_text.trim_start().starts_with('{') {
+                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&error_text) {
+                        if let Some(message) = json_value.get("message").and_then(|v| v.as_str()) {
+                            message.to_string()
+                        } else if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
+                            error.to_string()
+                        } else {
+                            error_text
+                        }
+                    } else {
+                        error_text
+                    }
+                } else {
+                    error_text
+                };
+                ChromaError::CollectionExists(parsed_msg)
+            }
+            429 => ChromaError::RateLimitExceeded,
+            _ => ChromaError::ApiError(format!("HTTP {}: {}", status, error_text)),
+        }
     }
 }
 

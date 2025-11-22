@@ -309,6 +309,41 @@ for cred in credentials {
 }
 ```
 
+#### `get_credentials_by_type(pool, manager, organization_uuid, credential_type) -> Result<Vec<Credential>, CredentialsError>`
+
+Gets all credentials of a specific type for an organization with decrypted data. This method is useful for workflows and worker nodes that need all credentials of a specific type.
+
+**Arguments:**
+- `pool: &DatabasePool` - Database connection pool
+- `manager: &CredentialsManager` - Credentials manager for decryption
+- `organization_uuid: &str` - UUID of the organization
+- `credential_type: &str` - Type of credential to filter by (e.g., "openai_credential", "github_credential")
+
+**Returns:**
+- `Ok(Vec<Credential>)` - Vector of credentials with decrypted data, filtered by credential type
+- `Err(CredentialsError::Decryption)` - Decryption failed for one or more credentials
+- `Err(CredentialsError::Database)` - Database operation failed
+
+**Note:** This function does not perform permission checks, as it may be called from worker nodes without user context. It is designed for use in workflows and worker nodes that need to retrieve all credentials of a specific type for an organization.
+
+**Example:**
+```rust
+use flextide_core::credentials::get_credentials_by_type;
+
+let credentials = get_credentials_by_type(
+    &pool,
+    &manager,
+    "org-uuid-here",
+    "openai_credential"
+).await?;
+
+for cred in credentials {
+    println!("Credential: {} - {}", cred.name, cred.credential_type);
+    // Use cred.data to access decrypted credential information
+    // All credentials returned are of type "openai_credential"
+}
+```
+
 #### `update_credential(pool, manager, credential_uuid, organization_uuid, user_uuid, name, data) -> Result<(), CredentialsError>`
 
 Updates a credential (overwrites encrypted data). Optionally updates the name.
@@ -423,6 +458,8 @@ use flextide_core::credentials::{
     CredentialsManager,
     create_credential,
     get_credential,
+    get_credentials,
+    get_credentials_by_type,
     list_credentials,
     update_credential,
     delete_credential,

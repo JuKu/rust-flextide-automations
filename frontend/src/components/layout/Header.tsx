@@ -59,6 +59,7 @@ const baseMenuItems: MenuItem[] = [
     href: "/organization",
     children: [
       { label: "Settings", href: "/organization/settings" },
+      { label: "Credentials", href: "/organization/credentials" },
       { label: "Billing", href: "/organization/billing" },
       { label: "Webhooks", href: "/organization/webhooks" },
     ],

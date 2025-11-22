@@ -66,13 +66,12 @@ pub async fn list_credentials(
         return Err(CredentialsError::UserNotInOrganization);
     }
 
-    // Check permission (using a generic permission for now)
-    // TODO: Define specific permission like "can_view_credentials"
+    // Check permission
     let has_permission = user_has_permission(
         pool,
         user_uuid,
         organization_uuid,
-        "can_view_credentials",
+        "can_see_all_credentials",
     )
     .await
     .map_err(|e| {
@@ -88,7 +87,7 @@ pub async fn list_credentials(
     match pool {
         DatabasePool::MySql(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE organization_uuid = ?
                  ORDER BY created_at DESC",
@@ -103,7 +102,7 @@ pub async fn list_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
                     updated_at: row.try_get("updated_at").ok().flatten(),
@@ -112,7 +111,7 @@ pub async fn list_credentials(
         }
         DatabasePool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE organization_uuid = $1
                  ORDER BY created_at DESC",
@@ -127,7 +126,7 @@ pub async fn list_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
                     updated_at: row.try_get("updated_at").ok().flatten(),
@@ -136,7 +135,7 @@ pub async fn list_credentials(
         }
         DatabasePool::Sqlite(p) => {
             let rows = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE organization_uuid = ?1
                  ORDER BY created_at DESC",
@@ -151,7 +150,7 @@ pub async fn list_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
                     updated_at: row.try_get("updated_at").ok().flatten(),
@@ -229,7 +228,7 @@ pub async fn create_credential(
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO credentials (uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at)
+                "INSERT INTO credentials (uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
             )
             .bind(&credential_uuid)
@@ -243,7 +242,7 @@ pub async fn create_credential(
         }
         DatabasePool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO credentials (uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at)
+                "INSERT INTO credentials (uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)",
             )
             .bind(&credential_uuid)
@@ -257,7 +256,7 @@ pub async fn create_credential(
         }
         DatabasePool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO credentials (uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at)
+                "INSERT INTO credentials (uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)",
             )
             .bind(&credential_uuid)
@@ -317,7 +316,7 @@ pub async fn get_credential(
         pool,
         user_uuid,
         organization_uuid,
-        "can_view_credentials",
+        "can_see_all_credentials",
     )
     .await
     .map_err(|e| {
@@ -333,7 +332,7 @@ pub async fn get_credential(
     let (uuid, org_uuid, name, credential_type, encrypted_data, creator_uuid, created_at, updated_at) = match pool {
         DatabasePool::MySql(p) => {
             let row = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid = ? AND organization_uuid = ?",
             )
@@ -348,7 +347,7 @@ pub async fn get_credential(
                 row.get("uuid"),
                 row.get("organization_uuid"),
                 row.get("name"),
-                row.get("type"),
+                row.get("credential_type"),
                 row.get::<Vec<u8>, _>("encrypted_data"),
                 row.get("creator_user_uuid"),
                 row.get::<DateTime<Utc>, _>("created_at"),
@@ -357,7 +356,7 @@ pub async fn get_credential(
         }
         DatabasePool::Postgres(p) => {
             let row = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid = $1 AND organization_uuid = $2",
             )
@@ -372,7 +371,7 @@ pub async fn get_credential(
                 row.get("uuid"),
                 row.get("organization_uuid"),
                 row.get("name"),
-                row.get("type"),
+                row.get("credential_type"),
                 row.get::<Vec<u8>, _>("encrypted_data"),
                 row.get("creator_user_uuid"),
                 row.get::<DateTime<Utc>, _>("created_at"),
@@ -381,7 +380,7 @@ pub async fn get_credential(
         }
         DatabasePool::Sqlite(p) => {
             let row = sqlx::query(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid = ?1 AND organization_uuid = ?2",
             )
@@ -396,7 +395,7 @@ pub async fn get_credential(
                 row.get("uuid"),
                 row.get("organization_uuid"),
                 row.get("name"),
-                row.get("type"),
+                row.get("credential_type"),
                 row.get::<Vec<u8>, _>("encrypted_data"),
                 row.get("creator_user_uuid"),
                 row.get::<DateTime<Utc>, _>("created_at"),
@@ -471,7 +470,7 @@ pub async fn get_credentials(
         pool,
         user_uuid,
         organization_uuid,
-        "can_view_credentials",
+        "can_see_all_credentials",
     )
     .await
     .map_err(|e| {
@@ -489,7 +488,7 @@ pub async fn get_credentials(
             // Build query with IN clause
             let placeholders = credential_uuids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let query = format!(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid IN ({}) AND organization_uuid = ?",
                 placeholders
@@ -512,7 +511,7 @@ pub async fn get_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
                     data,
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
@@ -528,7 +527,7 @@ pub async fn get_credentials(
                 .map(|i| format!("${}", i))
                 .collect();
             let query = format!(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid IN ({}) AND organization_uuid = ${}",
                 placeholders.join(","),
@@ -552,7 +551,7 @@ pub async fn get_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
                     data,
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
@@ -568,7 +567,7 @@ pub async fn get_credentials(
                 .map(|i| format!("?{}", i))
                 .collect();
             let query = format!(
-                "SELECT uuid, organization_uuid, name, type, encrypted_data, creator_user_uuid, created_at, updated_at
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
                  FROM credentials
                  WHERE uuid IN ({}) AND organization_uuid = ?{}",
                 placeholders.join(","),
@@ -592,7 +591,131 @@ pub async fn get_credentials(
                     uuid: row.get("uuid"),
                     organization_uuid: row.get("organization_uuid"),
                     name: row.get("name"),
-                    credential_type: row.get("type"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+    }
+}
+
+/// Get all credentials of a specific type for an organization (with decrypted data)
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `manager` - Credentials manager for decryption
+/// * `organization_uuid` - UUID of the organization
+/// * `credential_type` - Type of credential to filter by (e.g., "openai_credential", "github_credential")
+///
+/// # Returns
+/// Vector of credentials with decrypted data, filtered by credential type
+///
+/// # Errors
+/// Returns `CredentialsError` if:
+/// - Decryption fails
+/// - Database operation fails
+///
+/// # Note
+/// This function is useful for workflows and worker nodes that need all credentials of a specific type.
+/// It does not perform permission checks, as it may be called from worker nodes without user context.
+pub async fn get_credentials_by_type(
+    pool: &DatabasePool,
+    manager: &CredentialsManager,
+    organization_uuid: &str,
+    credential_type: &str,
+) -> Result<Vec<Credential>, CredentialsError> {
+
+    // Query credentials by type
+    match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = ? AND credential_type = ?
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = $1 AND credential_type = $2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
+                    data,
+                    creator_user_uuid: row.get("creator_user_uuid"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    updated_at: row.try_get("updated_at").ok().flatten(),
+                });
+            }
+
+            Ok(credentials)
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, organization_uuid, name, credential_type, encrypted_data, creator_user_uuid, created_at, updated_at
+                 FROM credentials
+                 WHERE organization_uuid = ?1 AND credential_type = ?2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(credential_type)
+            .fetch_all(p)
+            .await?;
+
+            let mut credentials = Vec::new();
+            for row in rows {
+                let encrypted_data: Vec<u8> = row.get("encrypted_data");
+                let data = manager.decrypt(&encrypted_data)?;
+
+                credentials.push(Credential {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    name: row.get("name"),
+                    credential_type: row.get("credential_type"),
                     data,
                     creator_user_uuid: row.get("creator_user_uuid"),
                     created_at: row.get::<DateTime<Utc>, _>("created_at"),
@@ -1001,7 +1124,7 @@ mod tests {
 
                 // Insert credential permissions
                 for (perm_id, perm_name, perm_title) in [
-                    ("00000000-0000-0000-0000-000000000010", "can_view_credentials", "View Credentials"),
+                    ("00000000-0000-0000-0000-000000000010", "can_see_all_credentials", "View Credentials"),
                     ("00000000-0000-0000-0000-000000000011", "can_create_credentials", "Create Credentials"),
                     ("00000000-0000-0000-0000-000000000012", "can_edit_credentials", "Edit Credentials"),
                     ("00000000-0000-0000-0000-000000000013", "can_delete_credentials", "Delete Credentials"),
@@ -1197,7 +1320,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
         grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
 
         // Create some credentials
@@ -1241,7 +1364,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
 
         let credentials = list_credentials(&pool, &org_uuid, &user_uuid)
             .await
@@ -1257,7 +1380,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
         grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
 
         let original_data = json!({"api_key": "test-key-123", "base_url": "https://api.example.com"});
@@ -1290,7 +1413,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
 
         let fake_uuid = Uuid::new_v4().to_string();
         let result = get_credential(&pool, &manager, &fake_uuid, &org_uuid, &user_uuid).await;
@@ -1309,7 +1432,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
         grant_permission(&pool, &user_uuid, &org_uuid, "can_create_credentials").await;
 
         let data1 = json!({"api_key": "key1"});
@@ -1373,7 +1496,7 @@ mod tests {
         let user_uuid = create_test_user(&pool, "test@example.com").await;
         let org_uuid = create_test_organization(&pool, &user_uuid).await;
         add_user_to_organization(&pool, &user_uuid, &org_uuid).await;
-        grant_permission(&pool, &user_uuid, &org_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user_uuid, &org_uuid, "can_see_all_credentials").await;
 
         let credentials = get_credentials(&pool, &manager, &[], &org_uuid, &user_uuid)
             .await
@@ -1538,9 +1661,9 @@ mod tests {
         add_user_to_organization(&pool, &user1_uuid, &org1_uuid).await;
         add_user_to_organization(&pool, &user2_uuid, &org2_uuid).await;
         grant_permission(&pool, &user1_uuid, &org1_uuid, "can_create_credentials").await;
-        grant_permission(&pool, &user1_uuid, &org1_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user1_uuid, &org1_uuid, "can_see_all_credentials").await;
         grant_permission(&pool, &user2_uuid, &org2_uuid, "can_create_credentials").await;
-        grant_permission(&pool, &user2_uuid, &org2_uuid, "can_view_credentials").await;
+        grant_permission(&pool, &user2_uuid, &org2_uuid, "can_see_all_credentials").await;
 
         // Create credential in org1
         let data1 = json!({"api_key": "org1-key"});
