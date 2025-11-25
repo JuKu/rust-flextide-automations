@@ -1937,6 +1937,318 @@ export async function getDocsArea(areaUuid: string): Promise<{ area: DocsArea }>
 }
 
 /**
+ * Transform a TreeNode from backend to TreeItem format for frontend
+ */
+function transformTreeNode(node: any): any {
+  if (node.type === 'folder') {
+    const folder = node.folder;
+    return {
+      type: 'folder',
+      uuid: folder.uuid,
+      name: folder.name,
+      parent_uuid: folder.parent_folder_uuid || null,
+      sort_order: folder.sort_order,
+      icon_name: folder.icon_name || null,
+      folder_color: folder.folder_color || null,
+      auto_sync_to_vector_db: folder.auto_sync_to_vector_db || false,
+      vcs_export_allowed: folder.vcs_export_allowed || false,
+      includes_private_data: folder.includes_private_data || false,
+      metadata: folder.metadata || null,
+      children: node.children ? node.children.map(transformTreeNode) : [],
+    };
+  } else if (node.type === 'page') {
+    const page = node.page;
+    return {
+      type: 'page',
+      uuid: page.uuid,
+      name: page.title,
+      parent_uuid: page.parent_page_uuid || page.folder_uuid || null,
+      sort_order: 0, // Pages don't have sort_order in the same way
+      children: node.children ? node.children.map(transformTreeNode) : [],
+    };
+  }
+  return node;
+}
+
+/**
+ * Get the folder tree structure for an area
+ */
+export async function getDocsAreaTree(areaUuid: string): Promise<{ area_uuid: string; items: any[] }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}/tree`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}/tree`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    
+    // Transform backend format to frontend format
+    const items: any[] = [];
+    
+    // Add folders
+    if (data.tree?.folders) {
+      items.push(...data.tree.folders.map(transformTreeNode));
+    }
+    
+    // Add pages
+    if (data.tree?.pages) {
+      items.push(...data.tree.pages.map(transformTreeNode));
+    }
+
+    return {
+      area_uuid: areaUuid,
+      items: items,
+    };
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get docs area tree:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new folder in a docs area
+ */
+export interface CreateDocsFolderRequest {
+  area_uuid: string;
+  name: string;
+  icon_name?: string | null;
+  folder_color?: string | null;
+  parent_folder_uuid?: string | null;
+  sort_order?: number | null;
+}
+
+export async function createDocsFolder(areaUuid: string, request: CreateDocsFolderRequest): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/areas/${areaUuid}/folders`), {
+      method: 'POST',
+      headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}/folders`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create docs folder:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update a docs folder
+ */
+export interface UpdateDocsFolderRequest {
+  name?: string | null;
+  icon_name?: string | null;
+  folder_color?: string | null;
+  sort_order?: number | null;
+}
+
+export async function updateDocsFolder(folderUuid: string, request: UpdateDocsFolderRequest): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/folders/${folderUuid}`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/modules/docs/folders/${folderUuid}`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update docs folder:', error);
+    throw error;
+  }
+}
+
+export interface UpdateDocsFolderPropertiesRequest {
+  auto_sync_to_vector_db: boolean;
+  vcs_export_allowed: boolean;
+  includes_private_data: boolean;
+  metadata: Record<string, any>;
+}
+
+/**
+ * Update docs folder properties
+ */
+export async function updateDocsFolderProperties(
+  folderUuid: string,
+  request: UpdateDocsFolderPropertiesRequest
+): Promise<{ message: string }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/folders/${folderUuid}/properties`),
+      {
+        method: 'PUT',
+        headers: getApiHeaders(`/api/modules/docs/folders/${folderUuid}/properties`),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update docs folder properties:', error);
+    throw error;
+  }
+}
+
+/**
+ * Move a docs folder to a different parent and/or position
+ */
+export interface MoveDocsFolderRequest {
+  parent_folder_uuid: string | null;
+  sort_order: number;
+}
+
+export async function moveDocsFolder(
+  folderUuid: string,
+  request: MoveDocsFolderRequest
+): Promise<{ message: string }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/folders/${folderUuid}/move`),
+      {
+        method: 'PUT',
+        headers: getApiHeaders(`/api/modules/docs/folders/${folderUuid}/move`),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to move docs folder:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a docs folder
+ */
+export async function deleteDocsFolder(folderUuid: string): Promise<{ message: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/folders/${folderUuid}`), {
+      method: 'DELETE',
+      headers: getApiHeaders(`/api/modules/docs/folders/${folderUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to delete docs folder:', error);
+    throw error;
+  }
+}
+
+/**
  * Update a docs area
  */
 export async function updateDocsArea(areaUuid: string, request: UpdateDocsAreaRequest): Promise<{ area: DocsArea; message: string }> {

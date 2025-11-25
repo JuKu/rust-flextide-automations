@@ -958,6 +958,132 @@ pub async fn list_pages(
     }
 }
 
+/// Get all pages for a given organization and area
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `area_uuid` - UUID of the area
+///
+/// # Returns
+/// Returns a vector of all pages sorted by created_at DESC
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if database operation fails
+pub async fn get_all_pages(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    area_uuid: &str,
+) -> Result<Vec<DocsPage>, DocsPageDatabaseError> {
+    match pool {
+        DatabasePool::MySql(p) => {
+            let pages = sqlx::query(
+                "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
+                 FROM module_docs_pages
+                 WHERE organization_uuid = ? AND area_uuid = ?
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(pages
+                .into_iter()
+                .map(|row| DocsPage {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    area_uuid: row.get("area_uuid"),
+                    folder_uuid: row.get("folder_uuid"),
+                    title: row.get("title"),
+                    short_summary: row.get("short_summary"),
+                    parent_page_uuid: row.get("parent_page_uuid"),
+                    current_version_uuid: row.get("current_version_uuid"),
+                    page_type: row.get("page_type"),
+                    last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
+                })
+                .collect())
+        }
+        DatabasePool::Postgres(p) => {
+            let pages = sqlx::query(
+                "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
+                 FROM module_docs_pages
+                 WHERE organization_uuid = $1 AND area_uuid = $2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(pages
+                .into_iter()
+                .map(|row| DocsPage {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    area_uuid: row.get("area_uuid"),
+                    folder_uuid: row.get("folder_uuid"),
+                    title: row.get("title"),
+                    short_summary: row.get("short_summary"),
+                    parent_page_uuid: row.get("parent_page_uuid"),
+                    current_version_uuid: row.get("current_version_uuid"),
+                    page_type: row.get("page_type"),
+                    last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
+                })
+                .collect())
+        }
+        DatabasePool::Sqlite(p) => {
+            let pages = sqlx::query(
+                "SELECT uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid,
+                 current_version_uuid, page_type, last_updated, created_at, auto_sync_to_vector_db,
+                 vcs_export_allowed, includes_private_data, metadata
+                 FROM module_docs_pages
+                 WHERE organization_uuid = ?1 AND area_uuid = ?2
+                 ORDER BY created_at DESC",
+            )
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .fetch_all(p)
+            .await?;
+
+            Ok(pages
+                .into_iter()
+                .map(|row| DocsPage {
+                    uuid: row.get("uuid"),
+                    organization_uuid: row.get("organization_uuid"),
+                    area_uuid: row.get("area_uuid"),
+                    folder_uuid: row.get("folder_uuid"),
+                    title: row.get("title"),
+                    short_summary: row.get("short_summary"),
+                    parent_page_uuid: row.get("parent_page_uuid"),
+                    current_version_uuid: row.get("current_version_uuid"),
+                    page_type: row.get("page_type"),
+                    last_updated: row.get::<DateTime<Utc>, _>("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                    auto_sync_to_vector_db: row.get("auto_sync_to_vector_db"),
+                    vcs_export_allowed: row.get("vcs_export_allowed"),
+                    includes_private_data: row.get("includes_private_data"),
+                    metadata: row.get("metadata"),
+                })
+                .collect())
+        }
+    }
+}
+
 /// Load a page with its current version by page UUID
 ///
 /// # Arguments

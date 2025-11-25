@@ -1,0 +1,158 @@
+/**
+ * Font Awesome Icon Utilities
+ * 
+ * Centralized icon exports for consistent usage across the application.
+ * 
+ * License: Font Awesome Free is licensed under:
+ * - Icons: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+ * - Fonts: SIL OFL 1.1 (https://scripts.sil.org/OFL)
+ * - Code: MIT License
+ * 
+ * Attribution: Icons by Font Awesome (https://fontawesome.com)
+ */
+
+import { 
+  IconDefinition,
+  library
+} from '@fortawesome/fontawesome-svg-core';
+import { 
+  faSun,
+  faMoon,
+  faUser,
+  faCog,
+  faSignOutAlt,
+  faBars,
+  faTimes,
+  faChevronDown,
+  faChevronUp,
+  faChevronRight,
+  faHome,
+  faProjectDiagram,
+  faPlay,
+  faHistory,
+  faEnvelope,
+  faServer,
+  faDatabase,
+  faBook,
+  faStore,
+  faBuilding,
+  faCreditCard,
+  faUsers,
+  faCloudDownload,
+  faPlus,
+  faEdit,
+  faTrash,
+  faCheck,
+  faTimes as faX,
+  faInfoCircle,
+  faExclamationTriangle,
+  faExclamationCircle,
+  faCheckCircle,
+  faFolder,
+  faFile,
+  faShare,
+  faDownload,
+  faTable,
+  faFileCode,
+} from '@fortawesome/free-solid-svg-icons';
+import {
+  faGithub,
+  faTwitter,
+  faLinkedin,
+} from '@fortawesome/free-brands-svg-icons';
+
+// Add all icons to the library for tree-shaking optimization
+library.add(
+  // Solid icons
+  faSun,
+  faMoon,
+  faUser,
+  faCog,
+  faSignOutAlt,
+  faBars,
+  faTimes,
+  faChevronDown,
+  faChevronUp,
+  faChevronRight,
+  faHome,
+  faProjectDiagram,
+  faPlay,
+  faHistory,
+  faEnvelope,
+  faServer,
+  faDatabase,
+  faBook,
+  faStore,
+  faBuilding,
+  faCreditCard,
+  faUsers,
+  faCloudDownload,
+  faPlus,
+  faEdit,
+  faTrash,
+  faCheck,
+  faX,
+  faInfoCircle,
+  faExclamationTriangle,
+  faExclamationCircle,
+  faCheckCircle,
+  faFolder,
+  faFile,
+  faShare,
+  faDownload,
+  faTable,
+  faFileCode,
+  // Brand icons
+  faGithub,
+  faTwitter,
+  faLinkedin,
+);
+
+// Re-export commonly used icons for convenience
+export {
+  faSun,
+  faMoon,
+  faUser,
+  faCog,
+  faSignOutAlt,
+  faBars,
+  faTimes,
+  faChevronDown,
+  faChevronUp,
+  faChevronRight,
+  faHome,
+  faProjectDiagram,
+  faPlay,
+  faHistory,
+  faEnvelope,
+  faServer,
+  faDatabase,
+  faBook,
+  faStore,
+  faBuilding,
+  faCreditCard,
+  faUsers,
+  faCloudDownload,
+  faPlus,
+  faEdit,
+  faTrash,
+  faCheck,
+  faX,
+  faInfoCircle,
+  faExclamationTriangle,
+  faExclamationCircle,
+  faCheckCircle,
+  faFolder,
+  faFile,
+  faShare,
+  faDownload,
+  faTable,
+  faFileCode,
+  faGithub,
+  faTwitter,
+  faLinkedin,
+};
+
+// Export icon types
+export type { IconDefinition };
+

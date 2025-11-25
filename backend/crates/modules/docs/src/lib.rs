@@ -2,19 +2,23 @@ mod api;
 mod area;
 mod folder;
 mod page;
+mod tree;
 
 pub use area::{
     AreaMemberPermissions, CreateDocsAreaRequest, DocsArea, DocsAreaDatabaseError,
     UpdateDocsAreaRequest, create_area, delete_area, load_area_by_uuid, update_area,
 };
 pub use folder::{
-    CreateDocsFolderRequest, DocsFolder, DocsFolderDatabaseError, UpdateDocsFolderRequest,
-    create_folder, delete_folder, list_folders, reorder_folder, update_folder_name,
+    CreateDocsFolderRequest, DocsFolder, DocsFolderDatabaseError, MoveDocsFolderRequest, UpdateDocsFolderRequest,
+    create_folder, delete_folder, get_all_folders, list_folders, move_folder, reorder_folder, update_folder, update_folder_name,
 };
 pub use page::{
     CreateDocsPageRequest, DocsPage, DocsPageDatabaseError, DocsPageVersion,
-    DocsPageWithVersion, create_page, delete_page, get_page_user_permissions,
+    DocsPageWithVersion, create_page, delete_page, get_all_pages, get_page_user_permissions,
     list_pages, load_page_with_version,
+};
+pub use tree::{
+    build_area_tree, DocsAreaTree, DocsTreeError, FolderNode, PageNode, TreeNode, get_area_tree,
 };
 
 use axum::{

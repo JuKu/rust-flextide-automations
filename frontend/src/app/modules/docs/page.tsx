@@ -6,6 +6,8 @@ import { listDocsAreas, listDocsActivity, type DocsAreaWithMembership, type Docs
 import { CreateAreaDialog } from "@/components/docs/CreateAreaDialog";
 import { EditAreaDialog } from "@/components/docs/EditAreaDialog";
 import { DeleteAreaDialog } from "@/components/docs/DeleteAreaDialog";
+import { Icon } from "@/components/common/Icon";
+import { getIconByName } from "@/lib/iconMapper";
 
 export default function DocsPage() {
   const [areas, setAreas] = useState<DocsAreaWithMembership[]>([]);
@@ -41,8 +43,7 @@ export default function DocsPage() {
   }, []);
 
   const handleAreaClick = (areaUuid: string) => {
-    // TODO: Navigate to area detail page
-    console.log("Area clicked:", areaUuid);
+    window.location.href = `/modules/docs/areas/${areaUuid}`;
   };
 
   return (
@@ -170,6 +171,20 @@ interface AreaCardProps {
 
 function AreaCard({ area, onClick, onEdit, onDelete }: AreaCardProps) {
   const isSuperAdminAccess = !area.is_member;
+  const icon = area.icon_name ? getIconByName(area.icon_name) : null;
+
+  // Helper to convert hex to rgba with opacity
+  const hexToRgba = (hex: string, opacity: number): string => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  };
+
+  const iconColor = area.color_hex || '#3B3B4D'; // Use area color or fallback to primary
+  const iconBgColor = area.color_hex 
+    ? hexToRgba(area.color_hex, 0.1) 
+    : 'rgba(59, 59, 77, 0.1)'; // 10% opacity background
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -251,8 +266,29 @@ function AreaCard({ area, onClick, onEdit, onDelete }: AreaCardProps) {
         className="w-full p-6 text-left"
       >
         <div className="flex items-start gap-4">
-          {area.icon_name ? (
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-flextide-primary/10 text-2xl">
+          {icon ? (
+            <div 
+              className="flex h-12 w-12 items-center justify-center rounded-lg"
+              style={{
+                backgroundColor: iconBgColor,
+              }}
+            >
+              <Icon 
+                icon={icon} 
+                size="2x" 
+                style={{
+                  color: iconColor,
+                }}
+              />
+            </div>
+          ) : area.icon_name ? (
+            <div 
+              className="flex h-12 w-12 items-center justify-center rounded-lg text-xs"
+              style={{
+                backgroundColor: iconBgColor,
+                color: iconColor,
+              }}
+            >
               {area.icon_name}
             </div>
           ) : (
@@ -274,7 +310,7 @@ function AreaCard({ area, onClick, onEdit, onDelete }: AreaCardProps) {
           )}
 
           <div className="flex-1">
-            <h3 className="font-semibold text-flextide-neutral-text-dark group-hover:text-flextide-primary-accent">
+            <h3 className="font-semibold text-flextide-primary-accent hover:text-flextide-primary cursor-pointer transition-colors">
               {area.short_name}
             </h3>
             {area.description && (
