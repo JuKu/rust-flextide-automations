@@ -92,6 +92,11 @@ pub struct AreaMemberPermissions {
     pub can_delete_pages: bool,
     pub can_delete_own_pages: bool,
     pub can_export_pages: bool,
+    pub can_add_folders: bool,
+    pub can_edit_folders: bool,
+    pub can_delete_folders: bool,
+    pub can_edit_page_properties: bool,
+    pub can_edit_folder_properties: bool,
     pub admin: bool,
 }
 
@@ -106,7 +111,8 @@ pub async fn load_area_member_permissions(
             let row = sqlx::query(
                 "SELECT role, can_view, can_add_pages, can_edit_pages, can_edit_own_pages,
                  can_archive_pages, can_archive_own_pages, can_delete_pages, can_delete_own_pages,
-                 can_export_pages, admin
+                 can_export_pages, can_add_folders, can_edit_folders, can_delete_folders,
+                 can_edit_page_properties, can_edit_folder_properties, admin
                  FROM module_docs_area_members
                  WHERE area_uuid = ? AND user_uuid = ?",
             )
@@ -127,6 +133,11 @@ pub async fn load_area_member_permissions(
                     can_delete_pages: row.get::<i64, _>("can_delete_pages") != 0,
                     can_delete_own_pages: row.get::<i64, _>("can_delete_own_pages") != 0,
                     can_export_pages: row.get::<i64, _>("can_export_pages") != 0,
+                    can_add_folders: row.get::<i64, _>("can_add_folders") != 0,
+                    can_edit_folders: row.get::<i64, _>("can_edit_folders") != 0,
+                    can_delete_folders: row.get::<i64, _>("can_delete_folders") != 0,
+                    can_edit_page_properties: row.get::<i64, _>("can_edit_page_properties") != 0,
+                    can_edit_folder_properties: row.get::<i64, _>("can_edit_folder_properties") != 0,
                     admin: row.get::<i64, _>("admin") != 0,
                 })),
                 None => Ok(None),
@@ -136,7 +147,8 @@ pub async fn load_area_member_permissions(
             let row = sqlx::query(
                 "SELECT role, can_view, can_add_pages, can_edit_pages, can_edit_own_pages,
                  can_archive_pages, can_archive_own_pages, can_delete_pages, can_delete_own_pages,
-                 can_export_pages, admin
+                 can_export_pages, can_add_folders, can_edit_folders, can_delete_folders,
+                 can_edit_page_properties, can_edit_folder_properties, admin
                  FROM module_docs_area_members
                  WHERE area_uuid = $1 AND user_uuid = $2",
             )
@@ -157,6 +169,11 @@ pub async fn load_area_member_permissions(
                     can_delete_pages: row.get::<i32, _>("can_delete_pages") != 0,
                     can_delete_own_pages: row.get::<i32, _>("can_delete_own_pages") != 0,
                     can_export_pages: row.get::<i32, _>("can_export_pages") != 0,
+                    can_add_folders: row.get::<i32, _>("can_add_folders") != 0,
+                    can_edit_folders: row.get::<i32, _>("can_edit_folders") != 0,
+                    can_delete_folders: row.get::<i32, _>("can_delete_folders") != 0,
+                    can_edit_page_properties: row.get::<i32, _>("can_edit_page_properties") != 0,
+                    can_edit_folder_properties: row.get::<i32, _>("can_edit_folder_properties") != 0,
                     admin: row.get::<i32, _>("admin") != 0,
                 })),
                 None => Ok(None),
@@ -166,7 +183,8 @@ pub async fn load_area_member_permissions(
             let row = sqlx::query(
                 "SELECT role, can_view, can_add_pages, can_edit_pages, can_edit_own_pages,
                  can_archive_pages, can_archive_own_pages, can_delete_pages, can_delete_own_pages,
-                 can_export_pages, admin
+                 can_export_pages, can_add_folders, can_edit_folders, can_delete_folders,
+                 can_edit_page_properties, can_edit_folder_properties, admin
                  FROM module_docs_area_members
                  WHERE area_uuid = ?1 AND user_uuid = ?2",
             )
@@ -187,6 +205,11 @@ pub async fn load_area_member_permissions(
                     can_delete_pages: row.get::<i64, _>("can_delete_pages") != 0,
                     can_delete_own_pages: row.get::<i64, _>("can_delete_own_pages") != 0,
                     can_export_pages: row.get::<i64, _>("can_export_pages") != 0,
+                    can_add_folders: row.get::<i64, _>("can_add_folders") != 0,
+                    can_edit_folders: row.get::<i64, _>("can_edit_folders") != 0,
+                    can_delete_folders: row.get::<i64, _>("can_delete_folders") != 0,
+                    can_edit_page_properties: row.get::<i64, _>("can_edit_page_properties") != 0,
+                    can_edit_folder_properties: row.get::<i64, _>("can_edit_folder_properties") != 0,
                     admin: row.get::<i64, _>("admin") != 0,
                 })),
                 None => Ok(None),
@@ -286,6 +309,71 @@ pub async fn load_area_by_uuid(
             }
         }
     }
+}
+
+/// Create a default "Example Folder" in an area
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `area_uuid` - UUID of the area
+///
+/// # Returns
+/// Returns the UUID of the created folder
+///
+/// # Errors
+/// Returns `DocsAreaDatabaseError` if database operation fails
+async fn create_example_folder(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    area_uuid: &str,
+) -> Result<String, DocsAreaDatabaseError> {
+    let folder_uuid = uuid::Uuid::new_v4().to_string();
+    
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_folders (uuid, organization_uuid, area_uuid, name, sort_order)
+                 VALUES (?, ?, ?, 'Example Folder', 0)",
+            )
+            .bind(&folder_uuid)
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_folders (uuid, organization_uuid, area_uuid, name, sort_order)
+                 VALUES ($1, $2, $3, 'Example Folder', 0)",
+            )
+            .bind(&folder_uuid)
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_folders (uuid, organization_uuid, area_uuid, name, sort_order)
+                 VALUES (?1, ?2, ?3, 'Example Folder', 0)",
+            )
+            .bind(&folder_uuid)
+            .bind(organization_uuid)
+            .bind(area_uuid)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    tracing::info!(
+        "Created example folder: folder_uuid={}, organization_uuid={}, area_uuid={}",
+        folder_uuid,
+        organization_uuid,
+        area_uuid
+    );
+
+    Ok(folder_uuid)
 }
 
 /// Create a new area in the database
@@ -428,8 +516,10 @@ pub async fn create_area(
                 "INSERT INTO module_docs_area_members
                  (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
                   can_edit_own_pages, can_archive_pages, can_archive_own_pages,
-                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
-                 VALUES (?, ?, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+                  can_delete_pages, can_delete_own_pages, can_export_pages,
+                  can_add_folders, can_edit_folders, can_delete_folders,
+                  can_edit_page_properties, can_edit_folder_properties, admin, created_at)
+                 VALUES (?, ?, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
             )
             .bind(&area_uuid)
             .bind(user_uuid)
@@ -441,8 +531,10 @@ pub async fn create_area(
                 "INSERT INTO module_docs_area_members
                  (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
                   can_edit_own_pages, can_archive_pages, can_archive_own_pages,
-                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
-                 VALUES ($1, $2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+                  can_delete_pages, can_delete_own_pages, can_export_pages,
+                  can_add_folders, can_edit_folders, can_delete_folders,
+                  can_edit_page_properties, can_edit_folder_properties, admin, created_at)
+                 VALUES ($1, $2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
             )
             .bind(&area_uuid)
             .bind(user_uuid)
@@ -454,8 +546,10 @@ pub async fn create_area(
                 "INSERT INTO module_docs_area_members
                  (area_uuid, user_uuid, role, can_view, can_add_pages, can_edit_pages,
                   can_edit_own_pages, can_archive_pages, can_archive_own_pages,
-                  can_delete_pages, can_delete_own_pages, can_export_pages, admin, created_at)
-                 VALUES (?1, ?2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
+                  can_delete_pages, can_delete_own_pages, can_export_pages,
+                  can_add_folders, can_edit_folders, can_delete_folders,
+                  can_edit_page_properties, can_edit_folder_properties, admin, created_at)
+                 VALUES (?1, ?2, 'owner', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, CURRENT_TIMESTAMP)",
             )
             .bind(&area_uuid)
             .bind(user_uuid)
@@ -463,6 +557,9 @@ pub async fn create_area(
             .await?;
         }
     }
+
+    // Create default "Example Folder" in the new area
+    create_example_folder(pool, organization_uuid, &area_uuid).await?;
 
     // Emit area created event
     if let Some(disp) = dispatcher {

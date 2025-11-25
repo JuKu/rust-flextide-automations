@@ -16,15 +16,17 @@ use flextide_core::jwt::Claims;
 use serde_json::{json, Value as JsonValue};
 
 use crate::area::{
-    create_area, delete_area, load_area_by_uuid, list_accessible_areas, update_area,
+    create_area, delete_area, load_area_by_uuid, load_area_member_permissions, list_accessible_areas, update_area,
     CreateDocsAreaRequest, DocsAreaDatabaseError, UpdateDocsAreaRequest,
 };
 use crate::folder::{
-    create_folder, delete_folder, list_folders, reorder_folder, update_folder_name,
-    CreateDocsFolderRequest, DocsFolderDatabaseError, UpdateDocsFolderRequest,
+    create_folder, delete_folder, list_folders, move_folder, reorder_folder, update_folder, update_folder_name,
+    update_folder_properties,
+    CreateDocsFolderRequest, DocsFolderDatabaseError, MoveDocsFolderRequest, UpdateDocsFolderRequest,
 };
 use crate::page::{list_pages, DocsPageDatabaseError};
-use flextide_core::user::user_belongs_to_organization;
+use crate::tree::{get_area_tree, DocsTreeError};
+use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 
 /// Create the API router for Docs endpoints
 pub fn create_api_router<S>() -> Router<S>
@@ -44,12 +46,19 @@ where
         .route("/modules/docs/areas/{area_uuid}/folders", post(create_folder_endpoint))
         .route("/modules/docs/areas/{area_uuid}/pages", get(list_pages_endpoint))
         .route("/modules/docs/folders/{uuid}", delete(delete_folder_endpoint))
+        .route("/modules/docs/folders/{uuid}", put(update_folder_endpoint))
         .route("/modules/docs/folders/{uuid}/name", put(update_folder_name_endpoint))
+        .route("/modules/docs/folders/{uuid}/properties", put(update_folder_properties_endpoint))
         .route(
             "/modules/docs/folders/{uuid}/sort-order",
             put(reorder_folder_endpoint),
         )
+        .route(
+            "/modules/docs/folders/{uuid}/move",
+            put(move_folder_endpoint),
+        )
         .route("/modules/docs/activity", get(list_activity_endpoint))
+        .route("/modules/docs/areas/{area_uuid}/tree", get(get_area_tree_endpoint))
 }
 
 async fn list_documents(
@@ -764,6 +773,231 @@ pub async fn update_folder_name_endpoint(
     })))
 }
 
+/// Update a folder
+///
+/// PUT /api/modules/docs/folders/{uuid}
+pub async fn update_folder_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(folder_uuid): Path<String>,
+    Json(mut request): Json<UpdateDocsFolderRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    tracing::info!(
+        "Updating folder: folder_uuid={}, organization_uuid={}, user_uuid={}",
+        folder_uuid,
+        org_uuid,
+        claims.user_uuid
+    );
+
+    // Validate name if provided
+    if let Some(ref name) = request.name {
+        if name.trim().is_empty() {
+            tracing::warn!(
+                "Folder update failed: empty name provided for folder_uuid={}",
+                folder_uuid
+            );
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Name cannot be empty" })),
+            ));
+        }
+
+        if name.len() > 255 {
+            tracing::warn!(
+                "Folder update failed: name too long ({} chars) for folder_uuid={}",
+                name.len(),
+                folder_uuid
+            );
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Name cannot exceed 255 characters" })),
+            ));
+        }
+    }
+
+    // Sanitize icon_name: trim whitespace, use "folder" as default if empty
+    request.icon_name = request.icon_name.as_ref()
+        .map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                "folder".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .or(Some("folder".to_string()));
+
+    // Sanitize folder_color: ensure it starts with # if provided, validate hex format, default to #000000 if invalid
+    request.folder_color = request.folder_color.as_ref()
+        .and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Some("#000000".to_string())
+            } else {
+                let color = if trimmed.starts_with('#') {
+                    trimmed.to_string()
+                } else {
+                    format!("#{}", trimmed)
+                };
+                
+                // Validate hex color format: must have 6 or 8 hex digits after #
+                let hex_part = &color[1..];
+                if hex_part.len() == 6 || hex_part.len() == 8 {
+                    // Check if all characters are valid hex (0-9, a-f, A-F)
+                    if hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+                        Some(color)
+                    } else {
+                        Some("#000000".to_string()) // Invalid hex characters, use black
+                    }
+                } else {
+                    Some("#000000".to_string()) // Invalid length, use black
+                }
+            }
+        })
+        .or(Some("#000000".to_string())); // If folder_color was None, use black
+
+    // Log sanitized values
+    tracing::debug!(
+        "Folder update request sanitized: folder_uuid={}, name={:?}, icon_name={:?}, folder_color={:?}",
+        folder_uuid,
+        request.name,
+        request.icon_name,
+        request.folder_color
+    );
+
+    // Update folder (permission checks are done inside update_folder)
+    update_folder(&pool, &folder_uuid, &org_uuid, &claims.user_uuid, request, Some(&dispatcher))
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Error updating folder: folder_uuid={}, organization_uuid={}, user_uuid={}, error={}",
+                folder_uuid,
+                org_uuid,
+                claims.user_uuid,
+                e
+            );
+            match e {
+                DocsFolderDatabaseError::UserNotInOrganization => (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "User does not belong to this organization" })),
+                ),
+                DocsFolderDatabaseError::PermissionDenied => (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "User does not have permission to edit this folder" })),
+                ),
+                DocsFolderDatabaseError::FolderNotFound => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "Folder not found" })),
+                ),
+                DocsFolderDatabaseError::FolderNotInOrganization => (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "Folder does not belong to this organization" })),
+                ),
+                DocsFolderDatabaseError::EmptyName => (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "Name cannot be empty" })),
+                ),
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to update folder" })),
+                ),
+            }
+        })?;
+
+    tracing::info!(
+        "Folder updated successfully: folder_uuid={}, organization_uuid={}, user_uuid={}",
+        folder_uuid,
+        org_uuid,
+        claims.user_uuid
+    );
+
+    Ok(Json(json!({
+        "message": "Folder updated successfully"
+    })))
+}
+
+/// Update folder properties
+///
+/// PUT /api/modules/docs/folders/{uuid}/properties
+pub async fn update_folder_properties_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(folder_uuid): Path<String>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Extract fields from request
+    let auto_sync_to_vector_db = request
+        .get("auto_sync_to_vector_db")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let vcs_export_allowed = request
+        .get("vcs_export_allowed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let includes_private_data = request
+        .get("includes_private_data")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let metadata = request
+        .get("metadata")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    // Update folder properties (permission checks are done inside update_folder_properties)
+    update_folder_properties(
+        &pool,
+        &folder_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+        auto_sync_to_vector_db,
+        vcs_export_allowed,
+        includes_private_data,
+        metadata,
+        Some(&dispatcher),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error updating folder properties: {}", e);
+        match e {
+            DocsFolderDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsFolderDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to edit folder properties" })),
+            ),
+            DocsFolderDatabaseError::FolderNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Folder not found" })),
+            ),
+            DocsFolderDatabaseError::FolderNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Folder does not belong to this organization" })),
+            ),
+            DocsFolderDatabaseError::InvalidMetadata => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Metadata must be a valid JSON object" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update folder properties" })),
+            ),
+        }
+    })?;
+
+    Ok(Json(json!({
+        "message": "Folder properties updated successfully"
+    })))
+}
+
 /// Reorder a folder
 ///
 /// PUT /api/modules/docs/folders/{uuid}/sort-order
@@ -812,6 +1046,199 @@ pub async fn reorder_folder_endpoint(
 
     Ok(Json(json!({
         "message": "Folder reordered successfully"
+    })))
+}
+
+/// Move a folder to a different parent and/or position
+///
+/// PUT /api/modules/docs/folders/{uuid}/move
+pub async fn move_folder_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(folder_uuid): Path<String>,
+    Json(request): Json<MoveDocsFolderRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Move folder (permission checks are done inside move_folder)
+    move_folder(
+        &pool,
+        &folder_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+        request.parent_folder_uuid,
+        request.sort_order,
+        Some(&dispatcher),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error moving folder: {}", e);
+        match e {
+            DocsFolderDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsFolderDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to move this folder" })),
+            ),
+            DocsFolderDatabaseError::FolderNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Folder not found" })),
+            ),
+            DocsFolderDatabaseError::FolderNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Folder does not belong to this organization" })),
+            ),
+            DocsFolderDatabaseError::AreaNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Area does not belong to this organization" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to move folder" })),
+            ),
+        }
+    })?;
+
+    Ok(Json(json!({
+        "message": "Folder moved successfully"
+    })))
+}
+
+/// Get the folder tree structure for an area (with nested folders and pages)
+///
+/// GET /api/modules/docs/areas/{area_uuid}/tree
+pub async fn get_area_tree_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(area_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Load area to verify it belongs to the organization
+    let area = load_area_by_uuid(&pool, &area_uuid).await.map_err(|e| {
+        tracing::error!("Error loading area: {}", e);
+        match e {
+            DocsAreaDatabaseError::AreaNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Area not found" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to load area" })),
+            ),
+        }
+    })?;
+
+    if area.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Area does not belong to this organization" })),
+        ));
+    }
+
+    // Check if user has super_admin permission (grants access to everything)
+    let has_super_admin = user_has_permission(&pool, &claims.user_uuid, &org_uuid, "super_admin")
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking super_admin permission: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    // Check if user is a member of the area OR has super_admin permission
+    let member_perms = load_area_member_permissions(&pool, &area_uuid, &claims.user_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error loading area member permissions: {}", e);
+            match e {
+                DocsAreaDatabaseError::Database(_) | DocsAreaDatabaseError::Sql(_) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Database error" })),
+                ),
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to check area membership" })),
+                ),
+            }
+        })?;
+
+    let is_member = member_perms.is_some();
+    
+    if !is_member && !has_super_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User is not a member of this area" })),
+        ));
+    }
+
+    // Check if user has can_view permission in the area OR has super_admin permission
+    let can_view = if has_super_admin {
+        true
+    } else if let Some(perms) = &member_perms {
+        perms.can_view || perms.admin || perms.role == "owner"
+    } else {
+        false
+    };
+
+    if !can_view {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not have permission to view this area" })),
+        ));
+    }
+
+    // Get the tree structure
+    let tree = get_area_tree(&pool, &org_uuid, &area_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error building area tree: {}", e);
+            match e {
+                DocsTreeError::FolderError(folder_err) => match folder_err {
+                    DocsFolderDatabaseError::Database(_) | DocsFolderDatabaseError::Sql(_) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    ),
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to load folders" })),
+                    ),
+                },
+                DocsTreeError::PageError(page_err) => match page_err {
+                    DocsPageDatabaseError::Database(_) | DocsPageDatabaseError::Sql(_) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Database error" })),
+                    ),
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to load pages" })),
+                    ),
+                },
+            }
+        })?;
+
+    Ok(Json(json!({
+        "tree": tree
     })))
 }
 

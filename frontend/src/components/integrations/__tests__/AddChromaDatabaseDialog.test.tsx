@@ -194,7 +194,8 @@ describe('AddChromaDatabaseDialog', () => {
       const authMethodSelect = screen.getByLabelText(/authentication method/i);
       await user.selectOptions(authMethodSelect, 'basic_auth');
 
-      expect(screen.getByText(/username:password/i)).toBeInTheDocument();
+      // There are multiple elements with "username:password" text (label and hint)
+      expect(screen.getAllByText(/username:password/i).length).toBeGreaterThan(0);
     });
   });
 
@@ -216,6 +217,10 @@ describe('AddChromaDatabaseDialog', () => {
 
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
+
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
 
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
@@ -245,6 +250,10 @@ describe('AddChromaDatabaseDialog', () => {
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
 
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
+
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
 
@@ -266,6 +275,10 @@ describe('AddChromaDatabaseDialog', () => {
           onSuccess={mockOnSuccess}
         />
       );
+
+      // Clear the baseUrl field to trigger validation
+      const baseUrlInput = screen.getByLabelText(/base url/i);
+      await user.clear(baseUrlInput);
 
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
@@ -338,6 +351,10 @@ describe('AddChromaDatabaseDialog', () => {
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
 
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
+
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
 
@@ -368,6 +385,10 @@ describe('AddChromaDatabaseDialog', () => {
 
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
+
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
 
       // Test connection first
       const testButton = screen.getByRole('button', { name: /test connection/i });
@@ -432,6 +453,10 @@ describe('AddChromaDatabaseDialog', () => {
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
 
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
+
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
 
@@ -455,6 +480,10 @@ describe('AddChromaDatabaseDialog', () => {
 
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
+
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
 
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
@@ -530,11 +559,15 @@ describe('AddChromaDatabaseDialog', () => {
       const additionalHeadersTextarea = screen.getByLabelText(/additional headers/i);
       await user.type(additionalHeadersTextarea, 'InvalidHeaderFormat');
 
+      // Fill in required fields
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
+
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);
 
       await waitFor(() => {
-        expect(screen.getByText(/invalid header format/i)).toBeInTheDocument();
+        expect(screen.getByText(/Invalid header format/i)).toBeInTheDocument();
       });
     });
 
@@ -558,6 +591,10 @@ describe('AddChromaDatabaseDialog', () => {
 
       const nameInput = screen.getByLabelText(/connection name/i);
       await user.type(nameInput, 'Test DB');
+
+      // Fill in required auth token field
+      const authTokenInput = screen.getByLabelText(/api key/i);
+      await user.type(authTokenInput, 'test-token');
 
       const testButton = screen.getByRole('button', { name: /test connection/i });
       await user.click(testButton);

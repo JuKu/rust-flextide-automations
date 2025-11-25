@@ -7,6 +7,9 @@ export function Footer() {
         <div className="flex items-center justify-between">
           <p className="text-sm text-flextide-neutral-text-medium">
             © {new Date().getFullYear()} Flextide Automation & AI. All rights reserved.
+            <span className="ml-2 text-xs">
+              Icons by <a href="https://fontawesome.com" target="_blank" rel="noopener noreferrer" className="hover:text-flextide-primary transition-colors">Font Awesome</a>
+            </span>
           </p>
           <div className="flex items-center gap-6 text-sm text-flextide-neutral-text-medium">
             <a
