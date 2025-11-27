@@ -1964,6 +1964,7 @@ function transformTreeNode(node: any): any {
       name: page.title,
       parent_uuid: page.parent_page_uuid || page.folder_uuid || null,
       sort_order: 0, // Pages don't have sort_order in the same way
+      page_type: page.page_type || null,
       children: node.children ? node.children.map(transformTreeNode) : [],
     };
   }
@@ -2244,6 +2245,167 @@ export async function deleteDocsFolder(folderUuid: string): Promise<{ message: s
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to delete docs folder:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new page in a docs area
+ */
+export interface CreateDocsPageRequest {
+  area_uuid: string;
+  title: string;
+  short_summary?: string | null;
+  folder_uuid?: string | null;
+  parent_page_uuid?: string | null;
+  page_type?: string;
+  auto_sync_to_vector_db?: boolean;
+  vcs_export_allowed?: boolean;
+  includes_private_data?: boolean;
+}
+
+export async function createDocsPage(
+  areaUuid: string,
+  request: CreateDocsPageRequest
+): Promise<{ uuid: string; message: string }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/areas/${areaUuid}/pages`),
+      {
+        method: 'POST',
+        headers: getApiHeaders(`/api/modules/docs/areas/${areaUuid}/pages`),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to create docs page:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a docs page with its content
+ */
+export interface DocsPageWithVersion {
+  uuid: string;
+  organization_uuid: string;
+  area_uuid: string;
+  folder_uuid: string | null;
+  title: string;
+  short_summary: string | null;
+  parent_page_uuid: string | null;
+  current_version_uuid: string | null;
+  page_type: string;
+  last_updated: string;
+  created_at: string;
+  auto_sync_to_vector_db: number;
+  vcs_export_allowed: number;
+  includes_private_data: number;
+  metadata: any;
+  version: {
+    uuid: string;
+    page_uuid: string;
+    version_number: number;
+    content: string;
+    last_updated: string | null;
+    created_at: string;
+  } | null;
+}
+
+export async function getDocsPage(pageUuid: string): Promise<{ page: DocsPageWithVersion }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/pages/${pageUuid}`), {
+      method: 'GET',
+      headers: getApiHeaders(`/api/modules/docs/pages/${pageUuid}`),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to get docs page:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update page content
+ */
+export interface UpdatePageContentRequest {
+  content: string;
+}
+
+export async function updatePageContent(
+  pageUuid: string,
+  request: UpdatePageContentRequest
+): Promise<{ message: string; version_uuid: string }> {
+  try {
+    const response = await fetch(getApiEndpoint(`/api/modules/docs/pages/${pageUuid}/content`), {
+      method: 'PUT',
+      headers: getApiHeaders(`/api/modules/docs/pages/${pageUuid}/content`),
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update page content:', error);
     throw error;
   }
 }

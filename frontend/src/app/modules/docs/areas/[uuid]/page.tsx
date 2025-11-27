@@ -7,12 +7,14 @@ import { getDocsArea, getDocsAreaTree, moveDocsFolder, type DocsArea } from "@/l
 import { showToast } from "@/lib/toast";
 import { Icon } from "@/components/common/Icon";
 import { getIconByName } from "@/lib/iconMapper";
-import { faChevronRight, faChevronDown, faFolder, faFile } from "@/lib/icons";
+import { faChevronRight, faChevronDown, faFolder, faFile, faMarkdown } from "@/lib/icons";
 import { TreeContextMenu } from "@/components/docs/TreeContextMenu";
 import { CreateFolderDialog } from "@/components/docs/CreateFolderDialog";
+import { CreateDocumentDialog } from "@/components/docs/CreateDocumentDialog";
 import { DeleteFolderDialog } from "@/components/docs/DeleteFolderDialog";
 import { EditFolderDialog } from "@/components/docs/EditFolderDialog";
 import { FolderPropertiesDialog } from "@/components/docs/FolderPropertiesDialog";
+import { PageContentArea } from "@/components/docs/PageContentArea";
 
 interface TreeItem {
   type: "folder" | "page";
@@ -22,6 +24,7 @@ interface TreeItem {
   sort_order: number;
   icon_name?: string | null;
   folder_color?: string | null;
+  page_type?: string;
   auto_sync_to_vector_db?: boolean;
   vcs_export_allowed?: boolean;
   includes_private_data?: boolean;
@@ -49,6 +52,15 @@ export default function AreaDetailPage() {
     uuid: string;
     name: string;
   } | null>(null);
+  const [showCreateDocumentDialog, setShowCreateDocumentDialog] = useState(false);
+  const [documentParentFolder, setDocumentParentFolder] = useState<{
+    uuid: string | null;
+    name: string;
+  } | null>(null);
+  const [documentParentPage, setDocumentParentPage] = useState<{
+    uuid: string | null;
+    name: string;
+  } | null>(null);
   const [showDeleteFolderDialog, setShowDeleteFolderDialog] = useState(false);
   const [folderToDelete, setFolderToDelete] = useState<{
     uuid: string;
@@ -73,6 +85,7 @@ export default function AreaDetailPage() {
   const [draggedItem, setDraggedItem] = useState<TreeItem | null>(null);
   const [dragOverItem, setDragOverItem] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"before" | "after" | "inside" | null>(null);
+  const [selectedPage, setSelectedPage] = useState<{ uuid: string; page_type: string } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -125,8 +138,10 @@ export default function AreaDetailPage() {
 
   const handleItemClick = (item: TreeItem) => {
     if (item.type === "page") {
-      // TODO: Open document in right column
-      console.log("Opening document:", item.uuid);
+      setSelectedPage({
+        uuid: item.uuid,
+        page_type: item.page_type || "markdown_page",
+      });
     } else {
       toggleFolder(item.uuid);
     }
@@ -407,7 +422,7 @@ export default function AreaDetailPage() {
           >
           <div className="w-3 h-3" /> {/* Spacer for alignment */}
           <Icon
-            icon={faFile}
+            icon={item.page_type === "markdown_page" ? faMarkdown : faFile}
             size="sm"
             className="text-flextide-neutral-text-medium"
           />
@@ -575,13 +590,11 @@ export default function AreaDetailPage() {
           </div>
 
           {/* Right Column - Content Area (80% on desktop, full width on mobile) */}
-          <div className="w-full sm:w-[80%] bg-flextide-neutral-panel-bg overflow-y-auto">
-            <div className="p-4 sm:p-6">
-              {/* Content will be implemented later */}
-              <div className="text-flextide-neutral-text-medium">
-                Content area - to be implemented
-              </div>
-            </div>
+          <div className="w-full sm:w-[80%] bg-flextide-neutral-panel-bg overflow-hidden flex flex-col">
+            <PageContentArea
+              pageUuid={selectedPage?.uuid || null}
+              pageType={selectedPage?.page_type || null}
+            />
           </div>
         </div>
 
@@ -662,6 +675,7 @@ export default function AreaDetailPage() {
               contextMenu.item?.type === "page"
                 ? () => {
                     handleItemClick(contextMenu.item!);
+                    setContextMenu(null);
                   }
                 : undefined
             }
@@ -690,15 +704,25 @@ export default function AreaDetailPage() {
                 : undefined
             }
             onCreateDocument={
-              !contextMenu.item || contextMenu.item.type === "folder"
+              !contextMenu.item || contextMenu.item.type === "folder" || contextMenu.item.type === "page"
                 ? () => {
                     if (contextMenu.item?.type === "folder") {
-                      console.log("Create new document in folder:", contextMenu.item.uuid);
-                      // TODO: Implement create document in folder
+                      setDocumentParentFolder({
+                        uuid: contextMenu.item.uuid,
+                        name: contextMenu.item.name,
+                      });
+                      setDocumentParentPage(null);
+                    } else if (contextMenu.item?.type === "page") {
+                      setDocumentParentFolder(null);
+                      setDocumentParentPage({
+                        uuid: contextMenu.item.uuid,
+                        name: contextMenu.item.name,
+                      });
                     } else {
-                      console.log("Create new document in area:", areaUuid);
-                      // TODO: Implement create document
+                      setDocumentParentFolder(null);
+                      setDocumentParentPage(null);
                     }
+                    setShowCreateDocumentDialog(true);
                   }
                 : undefined
             }
@@ -807,6 +831,26 @@ export default function AreaDetailPage() {
             folderColor={folderToEdit.folder_color}
           />
         )}
+
+        {/* Create Document Dialog */}
+        <CreateDocumentDialog
+          isOpen={showCreateDocumentDialog}
+          onClose={() => {
+            setShowCreateDocumentDialog(false);
+            setDocumentParentFolder(null);
+            setDocumentParentPage(null);
+          }}
+          onSuccess={() => {
+            setShowCreateDocumentDialog(false);
+            setDocumentParentFolder(null);
+            setDocumentParentPage(null);
+            loadData(); // Reload the tree to show the new document
+          }}
+          areaUuid={areaUuid}
+          folderUuid={documentParentFolder?.uuid || null}
+          folderName={documentParentFolder?.name}
+          parentPageUuid={documentParentPage?.uuid || null}
+        />
       </div>
     </AppLayout>
   );
