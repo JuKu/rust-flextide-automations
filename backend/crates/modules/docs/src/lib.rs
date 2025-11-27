@@ -2,6 +2,7 @@ mod api;
 mod area;
 mod folder;
 mod page;
+mod summary;
 mod tree;
 
 pub use area::{
@@ -14,8 +15,12 @@ pub use folder::{
 };
 pub use page::{
     CreateDocsPageRequest, DocsPage, DocsPageDatabaseError, DocsPageVersion,
-    DocsPageWithVersion, create_page, delete_page, get_all_pages, get_page_user_permissions,
-    list_pages, load_page_with_version,
+    DocsPageWithVersion, create_page, delete_page, generate_page_summary, get_all_pages, get_page_user_permissions,
+    list_pages, load_page_with_version, save_page_content, save_page_summary,
+};
+pub use summary::{
+    ClaudePageSummaryGenerator, GeminiPageSummaryGenerator, OpenAIPageSummaryGenerator,
+    PageSummaryError, PageSummaryGenerator,
 };
 pub use tree::{
     build_area_tree, DocsAreaTree, DocsTreeError, FolderNode, PageNode, TreeNode, get_area_tree,

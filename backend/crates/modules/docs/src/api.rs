@@ -11,7 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 use flextide_core::database::DatabasePool;
-use flextide_core::events::EventDispatcher;
+use flextide_core::events::{Event, EventDispatcher, EventPayload};
 use flextide_core::jwt::Claims;
 use serde_json::{json, Value as JsonValue};
 
@@ -24,7 +24,7 @@ use crate::folder::{
     update_folder_properties,
     CreateDocsFolderRequest, DocsFolderDatabaseError, MoveDocsFolderRequest, UpdateDocsFolderRequest,
 };
-use crate::page::{list_pages, DocsPageDatabaseError};
+use crate::page::{create_page, list_pages, load_page_with_version, save_page_content, CreateDocsPageRequest, DocsPageDatabaseError};
 use crate::tree::{get_area_tree, DocsTreeError};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 
@@ -45,6 +45,7 @@ where
         .route("/modules/docs/areas/{area_uuid}/folders", get(list_folders_endpoint))
         .route("/modules/docs/areas/{area_uuid}/folders", post(create_folder_endpoint))
         .route("/modules/docs/areas/{area_uuid}/pages", get(list_pages_endpoint))
+        .route("/modules/docs/areas/{area_uuid}/pages", post(create_page_endpoint))
         .route("/modules/docs/folders/{uuid}", delete(delete_folder_endpoint))
         .route("/modules/docs/folders/{uuid}", put(update_folder_endpoint))
         .route("/modules/docs/folders/{uuid}/name", put(update_folder_name_endpoint))
@@ -59,6 +60,8 @@ where
         )
         .route("/modules/docs/activity", get(list_activity_endpoint))
         .route("/modules/docs/areas/{area_uuid}/tree", get(get_area_tree_endpoint))
+        .route("/modules/docs/pages/{uuid}", get(get_page_endpoint))
+        .route("/modules/docs/pages/{uuid}/content", put(update_page_content_endpoint))
 }
 
 async fn list_documents(
@@ -1239,6 +1242,235 @@ pub async fn get_area_tree_endpoint(
 
     Ok(Json(json!({
         "tree": tree
+    })))
+}
+
+/// Create a new page
+///
+/// POST /api/modules/docs/areas/{area_uuid}/pages
+pub async fn create_page_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(area_uuid): Path<String>,
+    Json(mut request): Json<CreateDocsPageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Ensure area_uuid in request matches path
+    request.area_uuid = area_uuid.clone();
+
+    // Validate title
+    if request.title.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Title cannot be empty" })),
+        ));
+    }
+
+    if request.title.len() > 255 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Title cannot exceed 255 characters" })),
+        ));
+    }
+
+    // Create page (permission checks are done inside create_page)
+    let page_uuid = create_page(
+        &pool,
+        &org_uuid,
+        &claims.user_uuid,
+        request,
+        Some(&dispatcher),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating page: {}", e);
+        match e {
+            DocsPageDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to create pages" })),
+            ),
+            DocsPageDatabaseError::AreaNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Area not found" })),
+            ),
+            DocsPageDatabaseError::AreaNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Area does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::PageNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Parent page does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::EmptyTitle => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Title cannot be empty" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to create page" })),
+            ),
+        }
+    })?;
+
+    Ok(Json(json!({
+        "uuid": page_uuid,
+        "message": "Page created successfully"
+    })))
+}
+
+/// Request structure for updating page content
+#[derive(Debug, Deserialize)]
+pub struct UpdatePageContentRequest {
+    pub content: String,
+}
+
+/// Get a page by UUID with its current version
+///
+/// GET /api/modules/docs/pages/{uuid}
+pub async fn get_page_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(page_uuid): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Load page with version
+    let page = load_page_with_version(&pool, &page_uuid).await.map_err(|e| {
+        tracing::error!("Error loading page: {}", e);
+        match e {
+            DocsPageDatabaseError::PageNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Page not found" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to load page" })),
+            ),
+        }
+    })?;
+
+    // Verify page belongs to the organization
+    if page.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Page does not belong to this organization" })),
+        ));
+    }
+
+    Ok(Json(json!({
+        "page": page
+    })))
+}
+
+/// Update page content (creates new version if content changed)
+///
+/// PUT /api/modules/docs/pages/{uuid}/content
+pub async fn update_page_content_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(page_uuid): Path<String>,
+    Json(request): Json<UpdatePageContentRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Save page content (creates new version if content changed)
+    let version_uuid = save_page_content(
+        &pool,
+        &org_uuid,
+        &page_uuid,
+        &claims.user_uuid,
+        &request.content,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error saving page content: {}", e);
+        match e {
+            DocsPageDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to edit this page" })),
+            ),
+            DocsPageDatabaseError::PageNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Page not found" })),
+            ),
+            DocsPageDatabaseError::PageNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Page does not belong to this organization" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to save page content" })),
+            ),
+        }
+    })?;
+
+    // Emit page updated event
+    let page = load_page_with_version(&pool, &page_uuid).await.ok();
+    let event = Event::new(
+        "module_docs_page_content_updated",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": org_uuid,
+            "data": page.as_ref().map(|p| json!({
+                "title": p.title,
+                "page_type": p.page_type,
+                "version_uuid": version_uuid,
+            })).unwrap_or(json!({}))
+        }))
+    )
+    .with_organization(org_uuid.clone())
+    .with_user(claims.user_uuid.clone());
+
+    dispatcher.emit(event).await;
+
+    Ok(Json(json!({
+        "message": "Page content saved successfully",
+        "version_uuid": version_uuid
     })))
 }
 

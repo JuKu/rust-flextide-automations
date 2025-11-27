@@ -14,4 +14,5 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "mysql", "po
 thiserror = "2.0.17"
 tracing = "0.1"
 flextide-core = { path = "../../flextide-core" }
+integrations = { path = "../../integrations" }
 

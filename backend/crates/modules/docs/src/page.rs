@@ -5,11 +5,13 @@
 use chrono::{DateTime, Utc};
 use flextide_core::database::{DatabaseError, DatabasePool};
 use flextide_core::events::{Event, EventDispatcher, EventPayload};
+use flextide_core::settings::{get_organizational_setting_value, SettingsDatabaseError};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sqlx::Row;
 use thiserror::Error;
+use tracing::{error, info, warn};
 
 use crate::area::{
     load_area_by_uuid, load_area_member_permissions, AreaMemberPermissions, DocsAreaDatabaseError,
@@ -44,6 +46,21 @@ pub enum DocsPageDatabaseError {
 
     #[error("Title cannot be empty")]
     EmptyTitle,
+
+    #[error("Page version not found")]
+    PageVersionNotFound,
+
+    #[error("Settings error: {0}")]
+    Settings(#[from] SettingsDatabaseError),
+
+    #[error("AI provider setting not found or not configured")]
+    AIProviderSettingNotFound,
+
+    #[error("Unsupported AI provider: {0}")]
+    UnsupportedAIProvider(String),
+
+    #[error("Summary generation error: {0}")]
+    SummaryGeneration(#[from] crate::summary::PageSummaryError),
 }
 
 /// Docs Page data structure
@@ -72,8 +89,12 @@ pub struct CreateDocsPageRequest {
     pub area_uuid: String,
     pub title: String,
     pub short_summary: Option<String>,
+    pub folder_uuid: Option<String>,
     pub parent_page_uuid: Option<String>,
     pub page_type: Option<String>,
+    pub auto_sync_to_vector_db: Option<bool>,
+    pub vcs_export_allowed: Option<bool>,
+    pub includes_private_data: Option<bool>,
 }
 
 /// Docs Page Version data structure
@@ -108,6 +129,39 @@ pub struct DocsPageWithVersion {
     pub version: Option<DocsPageVersion>,
 }
 
+
+/// Load a page by UUID and verify it belongs to the organization
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `page_uuid` - UUID of the page to load
+/// * `organization_uuid` - UUID of the organization the page should belong to
+///
+/// # Returns
+/// Returns the loaded page if it exists and belongs to the organization
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if:
+/// - Page not found
+/// - Page does not belong to the organization
+/// - Database operation fails
+async fn load_and_verify_page_ownership(
+    pool: &DatabasePool,
+    page_uuid: &str,
+    organization_uuid: &str,
+) -> Result<DocsPage, DocsPageDatabaseError> {
+    let page = load_page_by_uuid(pool, page_uuid).await?;
+
+    if page.organization_uuid != organization_uuid {
+        warn!(
+            "Page {} does not belong to organization {}",
+            page_uuid, organization_uuid
+        );
+        return Err(DocsPageDatabaseError::PageNotInOrganization);
+    }
+
+    Ok(page)
+}
 
 /// Load a page by UUID
 async fn load_page_by_uuid(
@@ -307,43 +361,105 @@ pub async fn create_page(
         })?;
 
     // Check if user has permission to add pages
-    // Allow if: user is admin/owner in area, or has can_add_pages permission
+    // User must be a member of the area with can_add_pages permission, or be admin/owner
     let can_add = if let Some(perms) = &member_perms {
         perms.admin || perms.role == "owner" || perms.can_add_pages
     } else {
-        // If not a member, check if area is public and user has organization-level permission
-        if area.public {
-            user_has_permission(
-                pool,
-                user_uuid,
-                organization_uuid,
-                "module_docs_can_create_areas", // Using area creation permission as fallback
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("Database error checking permission: {}", e);
-                match e {
-                    flextide_core::user::UserDatabaseError::Database(db_err) => {
-                        DocsPageDatabaseError::Database(db_err)
-                    }
-                    flextide_core::user::UserDatabaseError::Sql(sql_err) => {
-                        DocsPageDatabaseError::Sql(sql_err)
-                    }
-                    _ => DocsPageDatabaseError::Database(
-                        flextide_core::database::DatabaseError::PoolCreationFailed(
-                            sqlx::Error::RowNotFound,
-                        ),
-                    ),
-                }
-            })?
-        } else {
-            false
-        }
+        // If not a member, user cannot add pages (even if area is public)
+        false
     };
 
-    if !can_add {
+    // Also check for organization-wide super_admin permission
+    let has_super_admin = user_has_permission(
+        pool,
+        user_uuid,
+        organization_uuid,
+        "super_admin",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking super_admin permission: {}", e);
+        match e {
+            flextide_core::user::UserDatabaseError::Database(db_err) => {
+                DocsPageDatabaseError::Database(db_err)
+            }
+            flextide_core::user::UserDatabaseError::Sql(sql_err) => {
+                DocsPageDatabaseError::Sql(sql_err)
+            }
+            _ => DocsPageDatabaseError::Database(
+                flextide_core::database::DatabaseError::PoolCreationFailed(
+                    sqlx::Error::RowNotFound,
+                ),
+            ),
+        }
+    })?;
+
+    if !can_add && !has_super_admin {
         return Err(DocsPageDatabaseError::PermissionDenied);
     }
+
+    // Determine flag values - inherit from folder if in a folder, otherwise use defaults
+    // We already validated the folder above, so we can safely query for its flags
+    let (auto_sync_to_vector_db, vcs_export_allowed, includes_private_data) = if let Some(ref folder_uuid) = request.folder_uuid {
+        // Query folder flags (we already validated the folder exists above)
+        let (folder_auto_sync, folder_vcs, folder_private) = match pool {
+            DatabasePool::MySql(p) => {
+                let row = sqlx::query(
+                    "SELECT auto_sync_to_vector_db, vcs_export_allowed, includes_private_data
+                     FROM module_docs_folders WHERE uuid = ?"
+                )
+                .bind(folder_uuid)
+                .fetch_one(p)
+                .await?;
+                (
+                    row.get::<i64, _>("auto_sync_to_vector_db") != 0,
+                    row.get::<i64, _>("vcs_export_allowed") != 0,
+                    row.get::<i64, _>("includes_private_data") != 0,
+                )
+            }
+            DatabasePool::Postgres(p) => {
+                let row = sqlx::query(
+                    "SELECT auto_sync_to_vector_db, vcs_export_allowed, includes_private_data
+                     FROM module_docs_folders WHERE uuid = $1"
+                )
+                .bind(folder_uuid)
+                .fetch_one(p)
+                .await?;
+                (
+                    row.get::<i32, _>("auto_sync_to_vector_db") != 0,
+                    row.get::<i32, _>("vcs_export_allowed") != 0,
+                    row.get::<i32, _>("includes_private_data") != 0,
+                )
+            }
+            DatabasePool::Sqlite(p) => {
+                let row = sqlx::query(
+                    "SELECT auto_sync_to_vector_db, vcs_export_allowed, includes_private_data
+                     FROM module_docs_folders WHERE uuid = ?1"
+                )
+                .bind(folder_uuid)
+                .fetch_one(p)
+                .await?;
+                (
+                    row.get::<i64, _>("auto_sync_to_vector_db") != 0,
+                    row.get::<i64, _>("vcs_export_allowed") != 0,
+                    row.get::<i64, _>("includes_private_data") != 0,
+                )
+            }
+        };
+        // Use folder's flags as defaults, but allow override from request
+        (
+            request.auto_sync_to_vector_db.unwrap_or(folder_auto_sync),
+            request.vcs_export_allowed.unwrap_or(folder_vcs),
+            request.includes_private_data.unwrap_or(folder_private),
+        )
+    } else {
+        // Use request values or defaults
+        (
+            request.auto_sync_to_vector_db.unwrap_or(false),
+            request.vcs_export_allowed.unwrap_or(false),
+            request.includes_private_data.unwrap_or(false),
+        )
+    };
 
     // Create page
     let page_uuid = uuid::Uuid::new_v4().to_string();
@@ -354,49 +470,66 @@ pub async fn create_page(
     match pool {
         DatabasePool::MySql(p) => {
             sqlx::query(
-                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, short_summary, parent_page_uuid, page_type)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&page_uuid)
             .bind(organization_uuid)
             .bind(&request.area_uuid)
+            .bind(&request.folder_uuid)
             .bind(&request.title)
             .bind(&request.short_summary)
             .bind(&request.parent_page_uuid)
             .bind(&page_type)
+            .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+            .bind(if vcs_export_allowed { 1 } else { 0 })
+            .bind(if includes_private_data { 1 } else { 0 })
             .execute(p)
             .await?;
         }
         DatabasePool::Postgres(p) => {
             sqlx::query(
-                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, short_summary, parent_page_uuid, page_type)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
             )
             .bind(&page_uuid)
             .bind(organization_uuid)
             .bind(&request.area_uuid)
+            .bind(&request.folder_uuid)
             .bind(&request.title)
             .bind(&request.short_summary)
             .bind(&request.parent_page_uuid)
             .bind(&page_type)
+            .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+            .bind(if vcs_export_allowed { 1 } else { 0 })
+            .bind(if includes_private_data { 1 } else { 0 })
             .execute(p)
             .await?;
         }
         DatabasePool::Sqlite(p) => {
             sqlx::query(
-                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, short_summary, parent_page_uuid, page_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, folder_uuid, title, short_summary, parent_page_uuid, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )
             .bind(&page_uuid)
             .bind(organization_uuid)
             .bind(&request.area_uuid)
+            .bind(&request.folder_uuid)
             .bind(&request.title)
             .bind(&request.short_summary)
             .bind(&request.parent_page_uuid)
             .bind(&page_type)
+            .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+            .bind(if vcs_export_allowed { 1 } else { 0 })
+            .bind(if includes_private_data { 1 } else { 0 })
             .execute(p)
             .await?;
         }
+    }
+
+    // Create initial version with template content (only for markdown_page type)
+    if page_type == "markdown_page" {
+        create_initial_page_version(pool, &page_uuid, &request.title).await?;
     }
 
     // Emit page created event
@@ -425,6 +558,113 @@ pub async fn create_page(
     }
 
     Ok(page_uuid)
+}
+
+/// Create an initial version for a page with template content
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `page_uuid` - UUID of the page
+/// * `page_title` - Title of the page (used in template)
+///
+/// # Returns
+/// Returns the UUID of the created version
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if database operation fails
+async fn create_initial_page_version(
+    pool: &DatabasePool,
+    page_uuid: &str,
+    page_title: &str,
+) -> Result<String, DocsPageDatabaseError> {
+    let version_uuid = uuid::Uuid::new_v4().to_string();
+    let template_content = format!("# {}\n\n\n\n\n", page_title);
+    let now = Utc::now();
+
+    match pool {
+        DatabasePool::MySql(p) => {
+            // Create version
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(1) // First version
+            .bind(&template_content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+
+            // Update page's current_version_uuid
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = ?, last_updated = ? WHERE uuid = ?",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            // Create version
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(1) // First version
+            .bind(&template_content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+
+            // Update page's current_version_uuid
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = $1, last_updated = $2 WHERE uuid = $3",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            // Create version
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(1) // First version
+            .bind(&template_content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+
+            // Update page's current_version_uuid
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = ?1, last_updated = ?2 WHERE uuid = ?3",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    info!(
+        "Created initial version {} for page {} with template content",
+        version_uuid, page_uuid
+    );
+
+    Ok(version_uuid)
 }
 
 /// Delete a page from the database
@@ -466,11 +706,7 @@ pub async fn delete_page(
 
     // Load page to verify it belongs to the organization
     // Also load it before deletion for event payload
-    let page = load_page_by_uuid(pool, page_uuid).await?;
-
-    if page.organization_uuid != organization_uuid {
-        return Err(DocsPageDatabaseError::PageNotInOrganization);
-    }
+    let page = load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
 
     // Load area to check permissions
     let area = load_area_by_uuid(pool, &page.area_uuid)
@@ -1249,5 +1485,779 @@ pub async fn load_page_with_version(
         metadata: page.metadata,
         version,
     })
+}
+
+/// Generate a summary for a documentation page using AI
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `page_uuid` - UUID of the page to generate summary for
+///
+/// # Returns
+/// Returns the generated summary as a String
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if:
+/// - Page doesn't belong to the organization
+/// - Page not found
+/// - Page version not found
+/// - AI provider setting not configured
+/// - Unsupported AI provider
+/// - Summary generation fails
+pub async fn generate_page_summary(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    page_uuid: &str,
+) -> Result<String, DocsPageDatabaseError> {
+    info!(
+        "Starting summary generation for page {} in organization {}",
+        page_uuid, organization_uuid
+    );
+
+    // Load the page and verify it belongs to the organization
+    let page = load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
+
+    info!("Page {} belongs to organization {}", page_uuid, organization_uuid);
+
+    // Get the current version
+    let version_uuid = page.current_version_uuid.clone().ok_or_else(|| {
+        error!("Page {} has no current version", page_uuid);
+        DocsPageDatabaseError::PageVersionNotFound
+    })?;
+
+    info!("Loading page version {} for page {}", version_uuid, page_uuid);
+
+    // Load the version
+    let version = match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions WHERE uuid = ?",
+            )
+            .bind(&version_uuid)
+            .fetch_optional(p)
+            .await?;
+
+            match row {
+                Some(row) => DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                },
+                None => {
+                    error!("Version {} not found for page {}", version_uuid, page_uuid);
+                    return Err(DocsPageDatabaseError::PageVersionNotFound);
+                }
+            }
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions WHERE uuid = $1",
+            )
+            .bind(&version_uuid)
+            .fetch_optional(p)
+            .await?;
+
+            match row {
+                Some(row) => DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                },
+                None => {
+                    error!("Version {} not found for page {}", version_uuid, page_uuid);
+                    return Err(DocsPageDatabaseError::PageVersionNotFound);
+                }
+            }
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions WHERE uuid = ?1",
+            )
+            .bind(&version_uuid)
+            .fetch_optional(p)
+            .await?;
+
+            match row {
+                Some(row) => DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                },
+                None => {
+                    error!("Version {} not found for page {}", version_uuid, page_uuid);
+                    return Err(DocsPageDatabaseError::PageVersionNotFound);
+                }
+            }
+        }
+    };
+
+    info!(
+        "Page version {} loaded successfully (content length: {} characters)",
+        version_uuid,
+        version.content.len()
+    );
+
+    // Get the AI provider setting
+    let ai_provider = get_organizational_setting_value(
+        pool,
+        organization_uuid,
+        "module_docs_page_summary_ai_provider",
+    )
+    .await?;
+
+    let ai_provider = ai_provider.ok_or_else(|| {
+        error!(
+            "AI provider setting not configured for organization {}",
+            organization_uuid
+        );
+        DocsPageDatabaseError::AIProviderSettingNotFound
+    })?;
+
+    info!(
+        "Using AI provider '{}' for summary generation",
+        ai_provider
+    );
+
+    // Create the appropriate generator based on the provider
+    let generator: Box<dyn crate::summary::PageSummaryGenerator> = match ai_provider.as_str() {
+        "openai" => {
+            // Get OpenAI API key from settings
+            let api_key = get_organizational_setting_value(
+                pool,
+                organization_uuid,
+                "module_docs_openai_api_key",
+            )
+            .await?
+            .ok_or_else(|| {
+                error!("OpenAI API key not configured for organization {}", organization_uuid);
+                DocsPageDatabaseError::AIProviderSettingNotFound
+            })?;
+
+            // Get OpenAI model from settings (default to gpt-4o-mini if not set)
+            let model = get_organizational_setting_value(
+                pool,
+                organization_uuid,
+                "module_docs_openai_model",
+            )
+            .await?
+            .unwrap_or_else(|| "gpt-4o-mini".to_string());
+
+            info!("Creating OpenAI generator with model: {}", model);
+            Box::new(crate::summary::OpenAIPageSummaryGenerator::new(api_key, model))
+        }
+        "claude" => {
+            error!("Claude provider not yet implemented");
+            return Err(DocsPageDatabaseError::UnsupportedAIProvider(ai_provider));
+        }
+        "gemini" => {
+            error!("Gemini provider not yet implemented");
+            return Err(DocsPageDatabaseError::UnsupportedAIProvider(ai_provider));
+        }
+        _ => {
+            error!("Unsupported AI provider: {}", ai_provider);
+            return Err(DocsPageDatabaseError::UnsupportedAIProvider(ai_provider));
+        }
+    };
+
+    // Generate the summary
+    info!(
+        "Calling AI provider '{}' to generate summary for page {}",
+        ai_provider, page_uuid
+    );
+
+    let summary = generator.generate_summary(&page, &version).await?;
+
+    info!(
+        "Successfully generated summary for page {} (length: {} characters)",
+        page_uuid,
+        summary.len()
+    );
+
+    Ok(summary)
+}
+
+/// Save a summary for a documentation page
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `page_uuid` - UUID of the page to save summary for
+/// * `summary` - The summary text to save
+///
+/// # Returns
+/// Returns `()` on success
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if:
+/// - Page doesn't belong to the organization
+/// - Page not found
+/// - Database operation fails
+pub async fn save_page_summary(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    page_uuid: &str,
+    summary: &str,
+) -> Result<(), DocsPageDatabaseError> {
+    info!(
+        "Saving summary for page {} in organization {}",
+        page_uuid, organization_uuid
+    );
+
+    // Load the page and verify it belongs to the organization
+    load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
+
+    info!("Page {} belongs to organization {}", page_uuid, organization_uuid);
+
+    // Update the short_summary field
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET short_summary = ? WHERE uuid = ? AND organization_uuid = ?",
+            )
+            .bind(summary)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET short_summary = $1 WHERE uuid = $2 AND organization_uuid = $3",
+            )
+            .bind(summary)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET short_summary = ?1 WHERE uuid = ?2 AND organization_uuid = ?3",
+            )
+            .bind(summary)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    info!(
+        "Successfully saved summary for page {} (length: {} characters)",
+        page_uuid,
+        summary.len()
+    );
+
+    Ok(())
+}
+
+/// Save page content by creating a new version (if content changed)
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `organization_uuid` - UUID of the organization
+/// * `page_uuid` - UUID of the page to save content for
+/// * `user_uuid` - UUID of the user saving the content
+/// * `content` - The content text to save
+///
+/// # Returns
+/// Returns the UUID of the new version (or existing version if content unchanged)
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if:
+/// - Page doesn't belong to the organization
+/// - Page not found
+/// - User doesn't have permission to edit pages
+/// - Database operation fails
+pub async fn save_page_content(
+    pool: &DatabasePool,
+    organization_uuid: &str,
+    page_uuid: &str,
+    user_uuid: &str,
+    content: &str,
+) -> Result<String, DocsPageDatabaseError> {
+    use flextide_core::user::user_has_permission;
+    use crate::area::{load_area_by_uuid, load_area_member_permissions};
+
+    info!(
+        "Saving content for page {} in organization {}",
+        page_uuid, organization_uuid
+    );
+
+    // Load the page and verify it belongs to the organization
+    let page = load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
+
+    info!("Page {} belongs to organization {}", page_uuid, organization_uuid);
+
+    // Verify area exists (for permission checking)
+    let _area = load_area_by_uuid(pool, &page.area_uuid)
+        .await
+        .map_err(|e| match e {
+            DocsAreaDatabaseError::AreaNotFound => DocsPageDatabaseError::AreaNotFound,
+            DocsAreaDatabaseError::Database(e) => DocsPageDatabaseError::Database(e),
+            DocsAreaDatabaseError::Sql(e) => DocsPageDatabaseError::Sql(e),
+            DocsAreaDatabaseError::UserNotInOrganization => {
+                DocsPageDatabaseError::UserNotInOrganization
+            }
+            DocsAreaDatabaseError::PermissionDenied => DocsPageDatabaseError::PermissionDenied,
+            DocsAreaDatabaseError::AreaNotInOrganization => {
+                DocsPageDatabaseError::AreaNotInOrganization
+            }
+            DocsAreaDatabaseError::EmptyShortName => {
+                DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                )
+            }
+        })?;
+
+    // Check area member permissions
+    let member_perms = load_area_member_permissions(pool, &page.area_uuid, user_uuid)
+        .await
+        .map_err(|e| match e {
+            DocsAreaDatabaseError::Database(e) => DocsPageDatabaseError::Database(e),
+            DocsAreaDatabaseError::Sql(e) => DocsPageDatabaseError::Sql(e),
+            DocsAreaDatabaseError::UserNotInOrganization => {
+                DocsPageDatabaseError::UserNotInOrganization
+            }
+            DocsAreaDatabaseError::PermissionDenied => DocsPageDatabaseError::PermissionDenied,
+            DocsAreaDatabaseError::AreaNotFound => DocsPageDatabaseError::AreaNotFound,
+            DocsAreaDatabaseError::AreaNotInOrganization => {
+                DocsPageDatabaseError::AreaNotInOrganization
+            }
+            DocsAreaDatabaseError::EmptyShortName => {
+                DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                )
+            }
+        })?;
+
+    // Check if user has permission to edit pages
+    let can_edit = if let Some(perms) = &member_perms {
+        perms.admin || perms.role == "owner" || perms.can_edit_pages
+        // TODO: Add check for can_edit_own_pages when creator_uuid is added to pages
+    } else {
+        // If not a member, user cannot edit pages
+        false
+    };
+
+    // Also check for organization-wide super_admin permission
+    let has_super_admin = user_has_permission(
+        pool,
+        user_uuid,
+        organization_uuid,
+        "module_docs_super_admin",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking permission: {}", e);
+        match e {
+            flextide_core::user::UserDatabaseError::Database(db_err) => {
+                DocsPageDatabaseError::Database(db_err)
+            }
+            flextide_core::user::UserDatabaseError::Sql(sql_err) => {
+                DocsPageDatabaseError::Sql(sql_err)
+            }
+            _ => DocsPageDatabaseError::Database(
+                flextide_core::database::DatabaseError::PoolCreationFailed(
+                    sqlx::Error::RowNotFound,
+                ),
+            ),
+        }
+    })?;
+
+    if !can_edit && !has_super_admin {
+        warn!(
+            "User {} does not have permission to edit page {}",
+            user_uuid, page_uuid
+        );
+        return Err(DocsPageDatabaseError::PermissionDenied);
+    }
+
+    // Get current version content if it exists
+    let current_content = if let Some(ref version_uuid) = page.current_version_uuid {
+        match pool {
+            DatabasePool::MySql(p) => {
+                let row = sqlx::query(
+                    "SELECT content FROM module_docs_page_versions WHERE uuid = ?",
+                )
+                .bind(version_uuid)
+                .fetch_optional(p)
+                .await?;
+
+                row.map(|row| row.get::<String, _>("content"))
+            }
+            DatabasePool::Postgres(p) => {
+                let row = sqlx::query(
+                    "SELECT content FROM module_docs_page_versions WHERE uuid = $1",
+                )
+                .bind(version_uuid)
+                .fetch_optional(p)
+                .await?;
+
+                row.map(|row| row.get::<String, _>("content"))
+            }
+            DatabasePool::Sqlite(p) => {
+                let row = sqlx::query(
+                    "SELECT content FROM module_docs_page_versions WHERE uuid = ?1",
+                )
+                .bind(version_uuid)
+                .fetch_optional(p)
+                .await?;
+
+                row.map(|row| row.get::<String, _>("content"))
+            }
+        }
+    } else {
+        None
+    };
+
+    // Check if content has changed
+    let content_changed = current_content.as_ref().map(|c| c != content).unwrap_or(true);
+
+    if !content_changed {
+        info!("Content for page {} unchanged, returning existing version", page_uuid);
+        return Ok(page.current_version_uuid.unwrap());
+    }
+
+    // Get the next version number
+    let next_version_number = match pool {
+        DatabasePool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
+                 FROM module_docs_page_versions WHERE page_uuid = ?",
+            )
+            .bind(page_uuid)
+            .fetch_one(p)
+            .await?;
+
+            row.get::<i32, _>("next_version")
+        }
+        DatabasePool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
+                 FROM module_docs_page_versions WHERE page_uuid = $1",
+            )
+            .bind(page_uuid)
+            .fetch_one(p)
+            .await?;
+
+            row.get::<i32, _>("next_version")
+        }
+        DatabasePool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
+                 FROM module_docs_page_versions WHERE page_uuid = ?1",
+            )
+            .bind(page_uuid)
+            .fetch_one(p)
+            .await?;
+
+            row.get::<i32, _>("next_version")
+        }
+    };
+
+    // Create new version
+    let version_uuid = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now();
+
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(next_version_number)
+            .bind(content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(next_version_number)
+            .bind(content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, last_updated, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&version_uuid)
+            .bind(page_uuid)
+            .bind(next_version_number)
+            .bind(content)
+            .bind(now)
+            .bind(now)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    // Update page's current_version_uuid and last_updated
+    match pool {
+        DatabasePool::MySql(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = ?, last_updated = ? WHERE uuid = ? AND organization_uuid = ?",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = $1, last_updated = $2 WHERE uuid = $3 AND organization_uuid = $4",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+        DatabasePool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE module_docs_pages SET current_version_uuid = ?1, last_updated = ?2 WHERE uuid = ?3 AND organization_uuid = ?4",
+            )
+            .bind(&version_uuid)
+            .bind(now)
+            .bind(page_uuid)
+            .bind(organization_uuid)
+            .execute(p)
+            .await?;
+        }
+    }
+
+    info!(
+        "Successfully saved content for page {} (version {}, length: {} characters)",
+        page_uuid,
+        next_version_number,
+        content.len()
+    );
+
+    Ok(version_uuid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn test_create_initial_page_version(pool: sqlx::SqlitePool) -> sqlx::Result<()> {
+        let pool = DatabasePool::Sqlite(pool);
+
+        // Set up required tables
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                // Create organizations table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS organizations (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        owner_user_id CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create organizations table");
+
+                // Create module_docs_areas table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_areas (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        organization_uuid CHAR(36) NOT NULL,
+                        short_name VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        icon_name VARCHAR(50),
+                        color_hex VARCHAR(20),
+                        topics TEXT,
+                        public INTEGER NOT NULL DEFAULT 0,
+                        visible INTEGER NOT NULL DEFAULT 1,
+                        deletable INTEGER NOT NULL DEFAULT 1,
+                        creator_uuid CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_areas table");
+
+                // Create module_docs_pages table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_pages (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        organization_uuid CHAR(36) NOT NULL,
+                        area_uuid CHAR(36) NOT NULL,
+                        folder_uuid CHAR(36),
+                        title VARCHAR(255) NOT NULL,
+                        short_summary TEXT,
+                        parent_page_uuid CHAR(36),
+                        current_version_uuid CHAR(36),
+                        page_type VARCHAR(50) NOT NULL DEFAULT 'markdown_page',
+                        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        auto_sync_to_vector_db INTEGER NOT NULL DEFAULT 0,
+                        vcs_export_allowed INTEGER NOT NULL DEFAULT 0,
+                        includes_private_data INTEGER NOT NULL DEFAULT 0,
+                        metadata TEXT,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+                        FOREIGN KEY (area_uuid) REFERENCES module_docs_areas(uuid) ON DELETE CASCADE
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_pages table");
+
+                // Create module_docs_page_versions table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_page_versions (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        page_uuid CHAR(36) NOT NULL,
+                        version_number INTEGER NOT NULL DEFAULT 1,
+                        content TEXT NOT NULL,
+                        last_updated TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (page_uuid) REFERENCES module_docs_pages(uuid) ON DELETE CASCADE,
+                        CONSTRAINT unique_page_version UNIQUE (page_uuid, version_number)
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_page_versions table");
+            }
+            _ => panic!("Test only supports SQLite"),
+        }
+
+        // Create test data
+        let org_uuid = uuid::Uuid::new_v4().to_string();
+        let area_uuid = uuid::Uuid::new_v4().to_string();
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        let user_uuid = uuid::Uuid::new_v4().to_string();
+        let page_title = "Test Page Title";
+
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                // Insert organization
+                sqlx::query(
+                    "INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?1, ?2, ?3)"
+                )
+                .bind(&org_uuid)
+                .bind("Test Org")
+                .bind(&user_uuid)
+                .execute(p)
+                .await
+                .expect("Failed to insert organization");
+
+                // Insert area
+                sqlx::query(
+                    "INSERT INTO module_docs_areas (uuid, organization_uuid, short_name, creator_uuid, public, visible, deletable)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+                )
+                .bind(&area_uuid)
+                .bind(&org_uuid)
+                .bind("Test Area")
+                .bind(&user_uuid)
+                .bind(0)
+                .bind(1)
+                .bind(1)
+                .execute(p)
+                .await
+                .expect("Failed to insert area");
+
+                // Insert page
+                sqlx::query(
+                    "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+                )
+                .bind(&page_uuid)
+                .bind(&org_uuid)
+                .bind(&area_uuid)
+                .bind(page_title)
+                .bind("markdown_page")
+                .bind(0)
+                .bind(0)
+                .bind(0)
+                .execute(p)
+                .await
+                .expect("Failed to insert page");
+            }
+            _ => unreachable!(),
+        }
+
+        // Test: Create initial version
+        let version_uuid = create_initial_page_version(&pool, &page_uuid, page_title)
+            .await
+            .expect("Failed to create initial page version");
+
+        // Verify version was created
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                // Check version exists with correct content
+                let version_row = sqlx::query(
+                    "SELECT uuid, page_uuid, version_number, content FROM module_docs_page_versions WHERE uuid = ?1"
+                )
+                .bind(&version_uuid)
+                .fetch_one(p)
+                .await
+                .expect("Version should exist");
+
+                assert_eq!(version_row.get::<String, _>("uuid"), version_uuid);
+                assert_eq!(version_row.get::<String, _>("page_uuid"), page_uuid);
+                assert_eq!(version_row.get::<i32, _>("version_number"), 1);
+                
+                let expected_content = format!("# {}\n\n\n\n\n", page_title);
+                assert_eq!(version_row.get::<String, _>("content"), expected_content);
+
+                // Check page's current_version_uuid was updated
+                let page_row = sqlx::query(
+                    "SELECT current_version_uuid FROM module_docs_pages WHERE uuid = ?1"
+                )
+                .bind(&page_uuid)
+                .fetch_one(p)
+                .await
+                .expect("Page should exist");
+
+                let current_version: Option<String> = page_row.get("current_version_uuid");
+                assert_eq!(current_version, Some(version_uuid.clone()));
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
 }
 

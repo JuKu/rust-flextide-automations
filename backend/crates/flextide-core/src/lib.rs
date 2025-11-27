@@ -9,6 +9,7 @@ pub mod events;
 pub mod jwt;
 pub mod permissions;
 pub mod queue;
+pub mod settings;
 pub mod user;
 
 #[cfg(test)]

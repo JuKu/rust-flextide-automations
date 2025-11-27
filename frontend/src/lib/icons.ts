@@ -54,11 +54,17 @@ import {
   faDownload,
   faTable,
   faFileCode,
+  faFileLines,
+  faCode,
+  faFileText,
+  faGripLinesVertical,
+  faSave,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   faGithub,
   faTwitter,
   faLinkedin,
+  faMarkdown,
 } from '@fortawesome/free-brands-svg-icons';
 
 // Add all icons to the library for tree-shaking optimization
@@ -102,10 +108,16 @@ library.add(
   faDownload,
   faTable,
   faFileCode,
+  faFileLines,
+  faCode,
+  faFileText,
+  faGripLinesVertical,
+  faSave,
   // Brand icons
   faGithub,
   faTwitter,
   faLinkedin,
+  faMarkdown,
 );
 
 // Re-export commonly used icons for convenience
@@ -148,9 +160,15 @@ export {
   faDownload,
   faTable,
   faFileCode,
+  faFileLines,
+  faCode,
+  faFileText,
+  faGripLinesVertical,
+  faSave,
   faGithub,
   faTwitter,
   faLinkedin,
+  faMarkdown,
 };
 
 // Export icon types
