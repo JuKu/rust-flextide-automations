@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { getDocsArea, getDocsAreaTree, moveDocsFolder, type DocsArea } from "@/lib/api";
+import { getDocsArea, getDocsAreaTree, moveDocsFolder, moveDocsPage, type DocsArea } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { Icon } from "@/components/common/Icon";
 import { getIconByName } from "@/lib/iconMapper";
@@ -35,6 +35,7 @@ interface TreeItem {
 export default function AreaDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const areaUuid = params.uuid as string;
 
   const [area, setArea] = useState<DocsArea | null>(null);
@@ -86,8 +87,9 @@ export default function AreaDetailPage() {
   const [dragOverItem, setDragOverItem] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"before" | "after" | "inside" | null>(null);
   const [selectedPage, setSelectedPage] = useState<{ uuid: string; page_type: string } | null>(null);
+  const dragStartedRef = useRef(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (preserveExpandedFolders: boolean = false) => {
     try {
       setLoading(true);
       setError(null);
@@ -100,8 +102,10 @@ export default function AreaDetailPage() {
       setArea(areaResponse.area);
       setTree(treeResponse.items);
       
-      // Folders are collapsed by default
-      setExpandedFolders(new Set());
+      // Only reset expanded folders if not preserving them
+      if (!preserveExpandedFolders) {
+        setExpandedFolders(new Set());
+      }
     } catch (err) {
       console.error("Failed to load area data:", err);
       setError(err instanceof Error ? err.message : "Failed to load data");
@@ -110,9 +114,44 @@ export default function AreaDetailPage() {
     }
   }, [areaUuid]);
 
+  // Load data when area UUID changes (initial load or area change)
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadData(false);
+  }, [areaUuid, loadData]); // loadData only changes when areaUuid changes
+
+  // Handle page selection from URL without reloading data
+  useEffect(() => {
+    const pageUuidFromUrl = searchParams.get("page");
+    if (pageUuidFromUrl) {
+      // Only update if tree is loaded
+      if (tree.length > 0) {
+        const findPageInTree = (items: TreeItem[]): TreeItem | null => {
+          for (const item of items) {
+            if (item.type === "page" && item.uuid === pageUuidFromUrl) {
+              return item;
+            }
+            if (item.children) {
+              const found = findPageInTree(item.children);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+
+        const pageItem = findPageInTree(tree);
+        if (pageItem && pageItem.type === "page") {
+          setSelectedPage({
+            uuid: pageItem.uuid,
+            page_type: pageItem.page_type || "markdown_page",
+          });
+        }
+      }
+      // If tree isn't loaded yet, the page will be set when tree loads (via initial loadData)
+    } else {
+      // Only clear if URL explicitly has no page parameter
+      setSelectedPage(null);
+    }
+  }, [searchParams, tree]);
 
   const toggleFolder = (folderUuid: string) => {
     setExpandedFolders(prev => {
@@ -137,11 +176,24 @@ export default function AreaDetailPage() {
   };
 
   const handleItemClick = (item: TreeItem) => {
+    // Skip click if a drag operation just occurred
+    if (dragStartedRef.current) {
+      // Reset the flag immediately after checking
+      dragStartedRef.current = false;
+      return;
+    }
+    
     if (item.type === "page") {
+      // Set selected page immediately for instant feedback
       setSelectedPage({
         uuid: item.uuid,
         page_type: item.page_type || "markdown_page",
       });
+      
+      // Update URL with page UUID - useEffect will keep it in sync
+      const currentSearchParams = new URLSearchParams(searchParams.toString());
+      currentSearchParams.set("page", item.uuid);
+      router.replace(`/modules/docs/areas/${areaUuid}?${currentSearchParams.toString()}`, { scroll: false });
     } else {
       toggleFolder(item.uuid);
     }
@@ -177,6 +229,7 @@ export default function AreaDetailPage() {
   };
 
   const handleDragStart = (e: React.DragEvent, item: TreeItem) => {
+    dragStartedRef.current = true;
     setDraggedItem(item);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", item.uuid);
@@ -255,14 +308,6 @@ export default function AreaDetailPage() {
       return;
     }
 
-    // Only handle folders for now
-    if (draggedItem.type !== "folder") {
-      setDraggedItem(null);
-      setDragOverItem(null);
-      setDragOverPosition(null);
-      return;
-    }
-
     try {
       let newParentUuid: string | null = null;
       let newSortOrder = 0;
@@ -301,17 +346,26 @@ export default function AreaDetailPage() {
         }
       }
 
-      await moveDocsFolder(draggedItem.uuid, {
-        parent_folder_uuid: newParentUuid,
-        sort_order: newSortOrder,
-      });
+      if (draggedItem.type === "folder") {
+        await moveDocsFolder(draggedItem.uuid, {
+          parent_folder_uuid: newParentUuid,
+          sort_order: newSortOrder,
+        });
+        showToast("Folder moved successfully", "success");
+      } else if (draggedItem.type === "page") {
+        await moveDocsPage(draggedItem.uuid, {
+          folder_uuid: newParentUuid,
+          sort_order: newSortOrder,
+        });
+        showToast("Document moved successfully", "success");
+      }
 
-      showToast("Folder moved successfully", "success");
       loadData(); // Reload tree
     } catch (err) {
-      console.error("Failed to move folder:", err);
+      console.error("Failed to move item:", err);
+      const itemType = draggedItem.type === "folder" ? "folder" : "document";
       showToast(
-        err instanceof Error ? err.message : "Failed to move folder",
+        err instanceof Error ? err.message : `Failed to move ${itemType}`,
         "error"
       );
     } finally {
@@ -325,6 +379,11 @@ export default function AreaDetailPage() {
     setDraggedItem(null);
     setDragOverItem(null);
     setDragOverPosition(null);
+    // Reset drag flag after a short delay to allow click events to check it first
+    // If a click occurs, it will reset the flag immediately
+    setTimeout(() => {
+      dragStartedRef.current = false;
+    }, 100);
   };
 
   const renderTreeItem = (item: TreeItem, level: number = 0) => {
@@ -413,7 +472,7 @@ export default function AreaDetailPage() {
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, item)}
             onDragEnd={handleDragEnd}
-            className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-move ${
+            className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer ${
               isDragged ? "opacity-50" : ""
             } hover:bg-flextide-neutral-light-bg`}
             style={{ paddingLeft: `${8 + level * 16}px` }}
@@ -504,7 +563,7 @@ export default function AreaDetailPage() {
             className="w-full sm:w-[20%] bg-flextide-neutral-light-bg border-r border-flextide-neutral-border overflow-y-auto border-b sm:border-b-0"
             onDragOver={(e) => {
               // Allow dropping into empty root area
-              if (draggedItem && draggedItem.type === "folder") {
+              if (draggedItem && (draggedItem.type === "folder" || draggedItem.type === "page")) {
                 const target = e.target as HTMLElement;
                 // Only allow drop if we're over empty space (not over a tree item)
                 if (!target.closest('[data-tree-item]')) {
@@ -529,7 +588,7 @@ export default function AreaDetailPage() {
             }}
             onDrop={async (e) => {
               // Handle dropping into empty root area
-              if (draggedItem && draggedItem.type === "folder" && dragOverItem === "__root__") {
+              if (draggedItem && (draggedItem.type === "folder" || draggedItem.type === "page") && dragOverItem === "__root__") {
                 e.preventDefault();
                 e.stopPropagation();
                 
@@ -540,17 +599,26 @@ export default function AreaDetailPage() {
                     ? Math.max(...rootItems.map(item => item.sort_order))
                     : -1;
                   
-                  await moveDocsFolder(draggedItem.uuid, {
-                    parent_folder_uuid: null,
-                    sort_order: maxSortOrder + 1,
-                  });
-
-                  showToast("Folder moved to root successfully", "success");
+                  if (draggedItem.type === "folder") {
+                    await moveDocsFolder(draggedItem.uuid, {
+                      parent_folder_uuid: null,
+                      sort_order: maxSortOrder + 1,
+                    });
+                    showToast("Folder moved to root successfully", "success");
+                  } else if (draggedItem.type === "page") {
+                    await moveDocsPage(draggedItem.uuid, {
+                      folder_uuid: null,
+                      sort_order: maxSortOrder + 1,
+                    });
+                    showToast("Document moved to root successfully", "success");
+                  }
+                  
                   loadData();
                 } catch (err) {
-                  console.error("Failed to move folder to root:", err);
+                  console.error("Failed to move item to root:", err);
+                  const itemType = draggedItem.type === "folder" ? "folder" : "document";
                   showToast(
-                    err instanceof Error ? err.message : "Failed to move folder to root",
+                    err instanceof Error ? err.message : `Failed to move ${itemType} to root`,
                     "error"
                   );
                 } finally {

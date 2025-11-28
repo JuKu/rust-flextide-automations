@@ -47,6 +47,9 @@ pub enum DocsPageDatabaseError {
     #[error("Title cannot be empty")]
     EmptyTitle,
 
+    #[error("Metadata must be a valid JSON object")]
+    InvalidMetadata,
+
     #[error("Page version not found")]
     PageVersionNotFound,
 
@@ -95,6 +98,13 @@ pub struct CreateDocsPageRequest {
     pub auto_sync_to_vector_db: Option<bool>,
     pub vcs_export_allowed: Option<bool>,
     pub includes_private_data: Option<bool>,
+}
+
+/// Request structure for moving a page
+#[derive(Debug, Deserialize)]
+pub struct MoveDocsPageRequest {
+    pub folder_uuid: Option<String>,
+    pub sort_order: i32,
 }
 
 /// Docs Page Version data structure
@@ -291,7 +301,7 @@ pub async fn create_page(
     organization_uuid: &str,
     user_uuid: &str,
     request: CreateDocsPageRequest,
-    dispatcher: Option<&EventDispatcher>,
+    dispatcher: &EventDispatcher,
 ) -> Result<String, DocsPageDatabaseError> {
     // Validate title
     if request.title.trim().is_empty() {
@@ -533,29 +543,27 @@ pub async fn create_page(
     }
 
     // Emit page created event
-    if let Some(disp) = dispatcher {
-        let page = load_page_by_uuid(pool, &page_uuid).await.ok();
-        let event = Event::new(
-            "module_docs_page_created",
-            EventPayload::new(json!({
-                "entity_type": "page",
-                "entity_id": page_uuid,
-                "organization_uuid": organization_uuid,
-                "data": page.as_ref().map(|p| json!({
-                    "title": p.title,
-                    "short_summary": p.short_summary,
-                    "area_uuid": p.area_uuid,
-                    "folder_uuid": p.folder_uuid,
-                    "parent_page_uuid": p.parent_page_uuid,
-                    "page_type": p.page_type
-                })).unwrap_or(json!({}))
-            }))
-        )
-        .with_organization(organization_uuid)
-        .with_user(user_uuid);
+    let page = load_page_by_uuid(pool, &page_uuid).await.ok();
+    let event = Event::new(
+        "module_docs_page_created",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": organization_uuid,
+            "data": page.as_ref().map(|p| json!({
+                "title": p.title,
+                "short_summary": p.short_summary,
+                "area_uuid": p.area_uuid,
+                "folder_uuid": p.folder_uuid,
+                "parent_page_uuid": p.parent_page_uuid,
+                "page_type": p.page_type
+            })).unwrap_or(json!({}))
+        }))
+    )
+    .with_organization(organization_uuid)
+    .with_user(user_uuid);
 
-        disp.emit(event).await;
-    }
+    dispatcher.emit(event).await;
 
     Ok(page_uuid)
 }
@@ -690,7 +698,7 @@ pub async fn delete_page(
     page_uuid: &str,
     organization_uuid: &str,
     user_uuid: &str,
-    dispatcher: Option<&EventDispatcher>,
+    dispatcher: &EventDispatcher,
 ) -> Result<(), DocsPageDatabaseError> {
     // Check if user belongs to organization
     let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
@@ -834,28 +842,26 @@ pub async fn delete_page(
     }
 
     // Emit page deleted event (before deletion, we already have the page data)
-    if let Some(disp) = dispatcher {
-        let event = Event::new(
-            "module_docs_page_deleted",
-            EventPayload::new(json!({
-                "entity_type": "page",
-                "entity_id": page_uuid,
-                "organization_uuid": organization_uuid,
-                "data": json!({
-                    "title": page.title,
-                    "short_summary": page.short_summary,
-                    "area_uuid": page.area_uuid,
-                    "folder_uuid": page.folder_uuid,
-                    "parent_page_uuid": page.parent_page_uuid,
-                    "page_type": page.page_type
-                })
-            }))
-        )
-        .with_organization(organization_uuid)
-        .with_user(user_uuid);
+    let event = Event::new(
+        "module_docs_page_deleted",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": organization_uuid,
+            "data": json!({
+                "title": page.title,
+                "short_summary": page.short_summary,
+                "area_uuid": page.area_uuid,
+                "folder_uuid": page.folder_uuid,
+                "parent_page_uuid": page.parent_page_uuid,
+                "page_type": page.page_type
+            })
+        }))
+    )
+    .with_organization(organization_uuid)
+    .with_user(user_uuid);
 
-        disp.emit(event).await;
-    }
+    dispatcher.emit(event).await;
 
     Ok(())
 }
@@ -1493,6 +1499,8 @@ pub async fn load_page_with_version(
 /// * `pool` - Database connection pool
 /// * `organization_uuid` - UUID of the organization
 /// * `page_uuid` - UUID of the page to generate summary for
+/// * `dispatcher` - Optional event dispatcher to emit events
+/// * `user_uuid` - Optional user UUID who triggered the generation
 ///
 /// # Returns
 /// Returns the generated summary as a String
@@ -1509,6 +1517,8 @@ pub async fn generate_page_summary(
     pool: &DatabasePool,
     organization_uuid: &str,
     page_uuid: &str,
+    dispatcher: &EventDispatcher,
+    user_uuid: Option<&str>,
 ) -> Result<String, DocsPageDatabaseError> {
     info!(
         "Starting summary generation for page {} in organization {}",
@@ -1686,6 +1696,28 @@ pub async fn generate_page_summary(
         summary.len()
     );
 
+    // Emit page summary generated event
+    let mut event = Event::new(
+        "module_docs_page_summary_generated",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": organization_uuid,
+            "data": {
+                "page_uuid": page_uuid,
+                "summary_length": summary.len(),
+                "ai_provider": ai_provider
+            }
+        })),
+    )
+    .with_organization(organization_uuid);
+    
+    if let Some(user_uuid) = user_uuid {
+        event = event.with_user(user_uuid);
+    }
+    
+    dispatcher.emit(event).await;
+
     Ok(summary)
 }
 
@@ -1696,6 +1728,8 @@ pub async fn generate_page_summary(
 /// * `organization_uuid` - UUID of the organization
 /// * `page_uuid` - UUID of the page to save summary for
 /// * `summary` - The summary text to save
+/// * `dispatcher` - Optional event dispatcher to emit events
+/// * `user_uuid` - Optional user UUID who saved the summary
 ///
 /// # Returns
 /// Returns `()` on success
@@ -1710,6 +1744,8 @@ pub async fn save_page_summary(
     organization_uuid: &str,
     page_uuid: &str,
     summary: &str,
+    dispatcher: &EventDispatcher,
+    user_uuid: Option<&str>,
 ) -> Result<(), DocsPageDatabaseError> {
     info!(
         "Saving summary for page {} in organization {}",
@@ -1761,6 +1797,27 @@ pub async fn save_page_summary(
         summary.len()
     );
 
+    // Emit page summary updated event
+    let mut event = Event::new(
+        "module_docs_page_summary_updated",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": organization_uuid,
+            "data": {
+                "page_uuid": page_uuid,
+                "summary_length": summary.len()
+            }
+        })),
+    )
+    .with_organization(organization_uuid);
+    
+    if let Some(user_uuid) = user_uuid {
+        event = event.with_user(user_uuid);
+    }
+    
+    dispatcher.emit(event).await;
+
     Ok(())
 }
 
@@ -1772,6 +1829,7 @@ pub async fn save_page_summary(
 /// * `page_uuid` - UUID of the page to save content for
 /// * `user_uuid` - UUID of the user saving the content
 /// * `content` - The content text to save
+/// * `dispatcher` - Optional event dispatcher to emit events
 ///
 /// # Returns
 /// Returns the UUID of the new version (or existing version if content unchanged)
@@ -1788,6 +1846,7 @@ pub async fn save_page_content(
     page_uuid: &str,
     user_uuid: &str,
     content: &str,
+    dispatcher: &EventDispatcher,
 ) -> Result<String, DocsPageDatabaseError> {
     use flextide_core::user::user_has_permission;
     use crate::area::{load_area_by_uuid, load_area_member_permissions};
@@ -2066,7 +2125,573 @@ pub async fn save_page_content(
         content.len()
     );
 
+    // Emit page version created event
+    let event = Event::new(
+        "module_docs_page_version_created",
+        EventPayload::new(json!({
+            "entity_type": "page_version",
+            "entity_id": version_uuid,
+            "organization_uuid": organization_uuid,
+            "data": {
+                "page_uuid": page_uuid,
+                "version_uuid": version_uuid,
+                "version_number": next_version_number,
+                "content_length": content.len()
+            }
+        })),
+    )
+    .with_organization(organization_uuid)
+    .with_user(user_uuid);
+
+    dispatcher.emit(event).await;
+
     Ok(version_uuid)
+}
+
+/// List page versions with pagination
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `page_uuid` - UUID of the page
+/// * `limit` - Maximum number of versions to return (default: 15)
+/// * `offset` - Number of versions to skip (default: 0)
+///
+/// # Returns
+/// Vector of `DocsPageVersion` structs ordered by version_number DESC
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if database operation fails
+pub async fn list_page_versions(
+    pool: &DatabasePool,
+    page_uuid: &str,
+    limit: Option<i32>,
+    offset: Option<i32>,
+) -> Result<Vec<DocsPageVersion>, DocsPageDatabaseError> {
+    let limit = limit.unwrap_or(15);
+    let offset = offset.unwrap_or(0);
+
+    match pool {
+        DatabasePool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions
+                 WHERE page_uuid = ?
+                 ORDER BY version_number DESC
+                 LIMIT ? OFFSET ?",
+            )
+            .bind(page_uuid)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions
+                 WHERE page_uuid = $1
+                 ORDER BY version_number DESC
+                 LIMIT $2 OFFSET $3",
+            )
+            .bind(page_uuid)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+        DatabasePool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT uuid, page_uuid, version_number, content, last_updated, created_at
+                 FROM module_docs_page_versions
+                 WHERE page_uuid = ?1
+                 ORDER BY version_number DESC
+                 LIMIT ?2 OFFSET ?3",
+            )
+            .bind(page_uuid)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(p)
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| DocsPageVersion {
+                    uuid: row.get("uuid"),
+                    page_uuid: row.get("page_uuid"),
+                    version_number: row.get("version_number"),
+                    content: row.get("content"),
+                    last_updated: row.get("last_updated"),
+                    created_at: row.get::<DateTime<Utc>, _>("created_at"),
+                })
+                .collect())
+        }
+    }
+}
+
+/// Update page properties (title, short_summary, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data, metadata)
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `page_uuid` - UUID of the page to update
+/// * `organization_uuid` - UUID of the organization
+/// * `user_uuid` - UUID of the user updating the page
+/// * `title` - New title for the page
+/// * `short_summary` - New short summary (optional)
+/// * `auto_sync_to_vector_db` - Whether to auto-sync to vector DB
+/// * `vcs_export_allowed` - Whether VCS export is allowed
+/// * `includes_private_data` - Whether page includes private data
+/// * `metadata` - JSON metadata (must be a valid JSON object)
+/// * `dispatcher` - Optional event dispatcher
+///
+/// # Returns
+/// Returns `()` on success
+///
+/// # Errors
+/// Returns `DocsPageDatabaseError` if:
+/// - User does not belong to the organization
+/// - User does not have permission to edit page properties
+/// - Page does not belong to the organization
+/// - Title is empty
+/// - Metadata is not a valid JSON object
+/// - Database operation fails
+pub async fn update_page_properties(
+    pool: &DatabasePool,
+    page_uuid: &str,
+    organization_uuid: &str,
+    user_uuid: &str,
+    title: &str,
+    short_summary: Option<&str>,
+    auto_sync_to_vector_db: bool,
+    vcs_export_allowed: bool,
+    includes_private_data: bool,
+    metadata: serde_json::Value,
+    dispatcher: &EventDispatcher,
+) -> Result<(), DocsPageDatabaseError> {
+    // Validate title is not empty
+    if title.trim().is_empty() {
+        return Err(DocsPageDatabaseError::EmptyTitle);
+    }
+
+    // Validate metadata is a JSON object (not array or primitive)
+    if !metadata.is_object() {
+        return Err(DocsPageDatabaseError::InvalidMetadata);
+    }
+
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            DocsPageDatabaseError::Database(e.into())
+        })?;
+
+    if !belongs {
+        return Err(DocsPageDatabaseError::UserNotInOrganization);
+    }
+
+    // Load page to verify it belongs to the organization
+    let page = load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
+
+    // Check area member permissions
+    let member_perms = load_area_member_permissions(pool, &page.area_uuid, user_uuid)
+        .await
+        .map_err(|e| match e {
+            DocsAreaDatabaseError::Database(e) => DocsPageDatabaseError::Database(e),
+            DocsAreaDatabaseError::Sql(e) => DocsPageDatabaseError::Sql(e),
+            DocsAreaDatabaseError::UserNotInOrganization => {
+                DocsPageDatabaseError::UserNotInOrganization
+            }
+            DocsAreaDatabaseError::PermissionDenied => DocsPageDatabaseError::PermissionDenied,
+            DocsAreaDatabaseError::AreaNotFound => DocsPageDatabaseError::AreaNotFound,
+            DocsAreaDatabaseError::AreaNotInOrganization => {
+                DocsPageDatabaseError::AreaNotInOrganization
+            }
+            DocsAreaDatabaseError::EmptyShortName => {
+                DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                )
+            }
+        })?;
+
+    // Check if user has permission to edit page properties
+    let can_edit = if let Some(perms) = &member_perms {
+        perms.admin || perms.role == "owner" || perms.can_edit_pages
+    } else {
+        false
+    };
+
+    // Also check for organization-wide super_admin permission
+    let has_super_admin = user_has_permission(
+        pool,
+        user_uuid,
+        organization_uuid,
+        "module_docs_super_admin",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking super_admin permission: {}", e);
+        match e {
+            flextide_core::user::UserDatabaseError::Database(db_err) => {
+                DocsPageDatabaseError::Database(db_err)
+            }
+            flextide_core::user::UserDatabaseError::Sql(sql_err) => {
+                DocsPageDatabaseError::Sql(sql_err)
+            }
+            _ => DocsPageDatabaseError::Database(
+                flextide_core::database::DatabaseError::PoolCreationFailed(
+                    sqlx::Error::RowNotFound,
+                ),
+            ),
+        }
+    })?;
+
+    if !can_edit && !has_super_admin {
+        warn!(
+            "User {} does not have permission to edit page properties {}",
+            user_uuid, page_uuid
+        );
+        return Err(DocsPageDatabaseError::PermissionDenied);
+    }
+
+    // Update page properties
+    match pool {
+        DatabasePool::MySql(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET title = ?, short_summary = ?, auto_sync_to_vector_db = ?, vcs_export_allowed = ?, includes_private_data = ?, metadata = ? WHERE uuid = ? AND organization_uuid = ?"
+            )
+                .bind(title.trim())
+                .bind(short_summary.map(|s| s.trim()).unwrap_or(""))
+                .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+                .bind(if vcs_export_allowed { 1 } else { 0 })
+                .bind(if includes_private_data { 1 } else { 0 })
+                .bind(&metadata)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+        DatabasePool::Postgres(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET title = $1, short_summary = $2, auto_sync_to_vector_db = $3, vcs_export_allowed = $4, includes_private_data = $5, metadata = $6 WHERE uuid = $7 AND organization_uuid = $8"
+            )
+                .bind(title.trim())
+                .bind(short_summary.map(|s| s.trim()).unwrap_or(""))
+                .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+                .bind(if vcs_export_allowed { 1 } else { 0 })
+                .bind(if includes_private_data { 1 } else { 0 })
+                .bind(&metadata)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+        DatabasePool::Sqlite(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET title = ?1, short_summary = ?2, auto_sync_to_vector_db = ?3, vcs_export_allowed = ?4, includes_private_data = ?5, metadata = ?6 WHERE uuid = ?7 AND organization_uuid = ?8"
+            )
+                .bind(title.trim())
+                .bind(short_summary.map(|s| s.trim()).unwrap_or(""))
+                .bind(if auto_sync_to_vector_db { 1 } else { 0 })
+                .bind(if vcs_export_allowed { 1 } else { 0 })
+                .bind(if includes_private_data { 1 } else { 0 })
+                .bind(&metadata)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+    }
+
+    // Emit page properties updated event
+    let page = load_page_by_uuid(pool, page_uuid).await.ok();
+    let event = Event::new(
+        "module_docs_page_properties_updated",
+        EventPayload::new(json!({
+            "entity_type": "page",
+            "entity_id": page_uuid,
+            "organization_uuid": organization_uuid,
+            "data": page.as_ref().map(|p| json!({
+                "title": p.title,
+                "short_summary": p.short_summary,
+                "auto_sync_to_vector_db": p.auto_sync_to_vector_db,
+                "vcs_export_allowed": p.vcs_export_allowed,
+                "includes_private_data": p.includes_private_data,
+                "metadata": p.metadata
+            })).unwrap_or(json!({}))
+        }))
+    )
+    .with_organization(organization_uuid)
+    .with_user(user_uuid);
+
+    dispatcher.emit(event).await;
+
+    info!(
+        "Successfully updated properties for page {} in organization {}",
+        page_uuid, organization_uuid
+    );
+
+    Ok(())
+}
+
+/// Move a page to a different folder
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `page_uuid` - UUID of the page to move
+/// * `organization_uuid` - UUID of the organization
+/// * `user_uuid` - UUID of the user performing the move
+/// * `folder_uuid` - UUID of the target folder (None for root)
+/// * `sort_order` - Sort order (currently not used, but kept for API consistency)
+/// * `dispatcher` - Optional event dispatcher
+///
+/// # Returns
+/// * `Ok(())` if the page was moved successfully
+/// * `Err(DocsPageDatabaseError)` if an error occurred
+pub async fn move_page(
+    pool: &DatabasePool,
+    page_uuid: &str,
+    organization_uuid: &str,
+    user_uuid: &str,
+    folder_uuid: Option<String>,
+    _sort_order: i32,
+    dispatcher: Option<&EventDispatcher>,
+) -> Result<(), DocsPageDatabaseError> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(pool, user_uuid, organization_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            DocsPageDatabaseError::Database(e.into())
+        })?;
+
+    if !belongs {
+        return Err(DocsPageDatabaseError::UserNotInOrganization);
+    }
+
+    // Load page to verify it belongs to the organization
+    let page = load_and_verify_page_ownership(pool, page_uuid, organization_uuid).await?;
+
+    // Validate folder if provided
+    if let Some(ref folder_uuid_str) = folder_uuid {
+        use crate::folder::load_folder_by_uuid;
+        use crate::folder::DocsFolderDatabaseError as FolderError;
+        
+        let folder = load_folder_by_uuid(pool, folder_uuid_str)
+            .await
+            .map_err(|e| match e {
+                FolderError::Database(db_err) => DocsPageDatabaseError::Database(db_err),
+                FolderError::Sql(sql_err) => DocsPageDatabaseError::Sql(sql_err),
+                FolderError::FolderNotFound => DocsPageDatabaseError::PageNotFound, // Reuse error type
+                _ => DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                ),
+            })?;
+        
+        if folder.organization_uuid != organization_uuid {
+            return Err(DocsPageDatabaseError::PageNotInOrganization);
+        }
+        
+        if folder.area_uuid != page.area_uuid {
+            return Err(DocsPageDatabaseError::AreaNotInOrganization);
+        }
+    }
+
+    // Load area to check permissions
+    let _area = load_area_by_uuid(pool, &page.area_uuid)
+        .await
+        .map_err(|e| match e {
+            DocsAreaDatabaseError::Database(e) => DocsPageDatabaseError::Database(e),
+            DocsAreaDatabaseError::Sql(e) => DocsPageDatabaseError::Sql(e),
+            DocsAreaDatabaseError::UserNotInOrganization => {
+                DocsPageDatabaseError::UserNotInOrganization
+            }
+            DocsAreaDatabaseError::PermissionDenied => DocsPageDatabaseError::PermissionDenied,
+            DocsAreaDatabaseError::AreaNotFound => DocsPageDatabaseError::AreaNotFound,
+            DocsAreaDatabaseError::AreaNotInOrganization => {
+                DocsPageDatabaseError::AreaNotInOrganization
+            }
+            DocsAreaDatabaseError::EmptyShortName => {
+                DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                )
+            }
+        })?;
+
+    // Check area member permissions
+    let member_perms = load_area_member_permissions(pool, &page.area_uuid, user_uuid)
+        .await
+        .map_err(|e| match e {
+            DocsAreaDatabaseError::Database(e) => DocsPageDatabaseError::Database(e),
+            DocsAreaDatabaseError::Sql(e) => DocsPageDatabaseError::Sql(e),
+            DocsAreaDatabaseError::UserNotInOrganization => {
+                DocsPageDatabaseError::UserNotInOrganization
+            }
+            DocsAreaDatabaseError::PermissionDenied => DocsPageDatabaseError::PermissionDenied,
+            DocsAreaDatabaseError::AreaNotFound => DocsPageDatabaseError::AreaNotFound,
+            DocsAreaDatabaseError::AreaNotInOrganization => {
+                DocsPageDatabaseError::AreaNotInOrganization
+            }
+            DocsAreaDatabaseError::EmptyShortName => {
+                DocsPageDatabaseError::Database(
+                    flextide_core::database::DatabaseError::PoolCreationFailed(
+                        sqlx::Error::RowNotFound,
+                    ),
+                )
+            }
+        })?;
+
+    // Check if user has permission to edit pages
+    let can_edit = if let Some(perms) = &member_perms {
+        perms.admin || perms.role == "owner" || perms.can_edit_pages
+    } else {
+        false
+    };
+
+    // Also check for organization-wide super_admin permission
+    let has_super_admin = user_has_permission(
+        pool,
+        user_uuid,
+        organization_uuid,
+        "module_docs_super_admin",
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error checking super_admin permission: {}", e);
+        match e {
+            flextide_core::user::UserDatabaseError::Database(db_err) => {
+                DocsPageDatabaseError::Database(db_err)
+            }
+            flextide_core::user::UserDatabaseError::Sql(sql_err) => {
+                DocsPageDatabaseError::Sql(sql_err)
+            }
+            _ => DocsPageDatabaseError::Database(
+                flextide_core::database::DatabaseError::PoolCreationFailed(
+                    sqlx::Error::RowNotFound,
+                ),
+            ),
+        }
+    })?;
+
+    if !can_edit && !has_super_admin {
+        return Err(DocsPageDatabaseError::PermissionDenied);
+    }
+
+    // Update folder_uuid
+    match pool {
+        DatabasePool::MySql(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET folder_uuid = ? WHERE uuid = ? AND organization_uuid = ?"
+            )
+                .bind(&folder_uuid)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+        DatabasePool::Postgres(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET folder_uuid = $1 WHERE uuid = $2 AND organization_uuid = $3"
+            )
+                .bind(&folder_uuid)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+        DatabasePool::Sqlite(p) => {
+            let result = sqlx::query(
+                "UPDATE module_docs_pages SET folder_uuid = ?1 WHERE uuid = ?2 AND organization_uuid = ?3"
+            )
+                .bind(&folder_uuid)
+                .bind(page_uuid)
+                .bind(organization_uuid)
+                .execute(p)
+                .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(DocsPageDatabaseError::PageNotFound);
+            }
+        }
+    }
+
+    // Emit page moved event
+    if let Some(disp) = dispatcher {
+        let page = load_page_by_uuid(pool, page_uuid).await.ok();
+        let event = Event::new(
+            "module_docs_page_moved",
+            EventPayload::new(json!({
+                "entity_type": "page",
+                "entity_id": page_uuid,
+                "organization_uuid": organization_uuid,
+                "data": page.as_ref().map(|p| json!({
+                    "title": p.title,
+                    "folder_uuid": p.folder_uuid,
+                    "area_uuid": p.area_uuid
+                })).unwrap_or(json!({}))
+            }))
+        )
+        .with_organization(organization_uuid)
+        .with_user(user_uuid);
+
+        disp.emit(event).await;
+    }
+
+    info!(
+        "Successfully moved page {} to folder {:?} in organization {}",
+        page_uuid, folder_uuid, organization_uuid
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2255,6 +2880,270 @@ mod tests {
                 assert_eq!(current_version, Some(version_uuid.clone()));
             }
             _ => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_list_page_versions(pool: sqlx::SqlitePool) -> sqlx::Result<()> {
+        let pool = DatabasePool::Sqlite(pool);
+
+        // Set up required tables
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                // Create organizations table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS organizations (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        owner_user_id CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create organizations table");
+
+                // Create module_docs_areas table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_areas (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        organization_uuid CHAR(36) NOT NULL,
+                        short_name VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        icon_name VARCHAR(50),
+                        color_hex VARCHAR(20),
+                        topics TEXT,
+                        public INTEGER NOT NULL DEFAULT 0,
+                        visible INTEGER NOT NULL DEFAULT 1,
+                        deletable INTEGER NOT NULL DEFAULT 1,
+                        creator_uuid CHAR(36) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_areas table");
+
+                // Create module_docs_pages table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_pages (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        organization_uuid CHAR(36) NOT NULL,
+                        area_uuid CHAR(36) NOT NULL,
+                        folder_uuid CHAR(36),
+                        title VARCHAR(255) NOT NULL,
+                        short_summary TEXT,
+                        parent_page_uuid CHAR(36),
+                        current_version_uuid CHAR(36),
+                        page_type VARCHAR(50) NOT NULL DEFAULT 'markdown_page',
+                        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        auto_sync_to_vector_db INTEGER NOT NULL DEFAULT 0,
+                        vcs_export_allowed INTEGER NOT NULL DEFAULT 0,
+                        includes_private_data INTEGER NOT NULL DEFAULT 0,
+                        metadata TEXT,
+                        FOREIGN KEY (organization_uuid) REFERENCES organizations(uuid) ON DELETE CASCADE,
+                        FOREIGN KEY (area_uuid) REFERENCES module_docs_areas(uuid) ON DELETE CASCADE
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_pages table");
+
+                // Create module_docs_page_versions table
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS module_docs_page_versions (
+                        uuid CHAR(36) NOT NULL PRIMARY KEY,
+                        page_uuid CHAR(36) NOT NULL,
+                        version_number INTEGER NOT NULL DEFAULT 1,
+                        content TEXT NOT NULL,
+                        last_updated TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (page_uuid) REFERENCES module_docs_pages(uuid) ON DELETE CASCADE,
+                        CONSTRAINT unique_page_version UNIQUE (page_uuid, version_number)
+                    )"
+                )
+                .execute(p)
+                .await
+                .expect("Failed to create module_docs_page_versions table");
+            }
+            _ => panic!("Test only supports SQLite"),
+        }
+
+        // Create test data
+        let org_uuid = uuid::Uuid::new_v4().to_string();
+        let area_uuid = uuid::Uuid::new_v4().to_string();
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        let other_page_uuid = uuid::Uuid::new_v4().to_string();
+        let user_uuid = uuid::Uuid::new_v4().to_string();
+
+        match &pool {
+            DatabasePool::Sqlite(p) => {
+                // Insert organization
+                sqlx::query(
+                    "INSERT INTO organizations (uuid, name, owner_user_id) VALUES (?1, ?2, ?3)"
+                )
+                .bind(&org_uuid)
+                .bind("Test Org")
+                .bind(&user_uuid)
+                .execute(p)
+                .await
+                .expect("Failed to insert organization");
+
+                // Insert area
+                sqlx::query(
+                    "INSERT INTO module_docs_areas (uuid, organization_uuid, short_name, creator_uuid, public, visible, deletable)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+                )
+                .bind(&area_uuid)
+                .bind(&org_uuid)
+                .bind("Test Area")
+                .bind(&user_uuid)
+                .bind(0)
+                .bind(1)
+                .bind(1)
+                .execute(p)
+                .await
+                .expect("Failed to insert area");
+
+                // Insert pages
+                sqlx::query(
+                    "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+                )
+                .bind(&page_uuid)
+                .bind(&org_uuid)
+                .bind(&area_uuid)
+                .bind("Test Page")
+                .bind("markdown_page")
+                .bind(0)
+                .bind(0)
+                .bind(0)
+                .execute(p)
+                .await
+                .expect("Failed to insert page");
+
+                sqlx::query(
+                    "INSERT INTO module_docs_pages (uuid, organization_uuid, area_uuid, title, page_type, auto_sync_to_vector_db, vcs_export_allowed, includes_private_data)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+                )
+                .bind(&other_page_uuid)
+                .bind(&org_uuid)
+                .bind(&area_uuid)
+                .bind("Other Page")
+                .bind("markdown_page")
+                .bind(0)
+                .bind(0)
+                .bind(0)
+                .execute(p)
+                .await
+                .expect("Failed to insert other page");
+
+                // Create multiple versions for the test page with different creation dates
+                // We'll insert them with explicit timestamps to ensure proper ordering
+                let now = chrono::Utc::now();
+                let versions_data = vec![
+                    (1, "Version 1 content", now - chrono::Duration::days(5)),
+                    (2, "Version 2 content", now - chrono::Duration::days(3)),
+                    (3, "Version 3 content", now - chrono::Duration::days(1)),
+                    (4, "Version 4 content", now),
+                ];
+
+                for (version_num, content, created_at) in versions_data {
+                    let version_uuid = uuid::Uuid::new_v4().to_string();
+                    sqlx::query(
+                        "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)"
+                    )
+                    .bind(&version_uuid)
+                    .bind(&page_uuid)
+                    .bind(version_num)
+                    .bind(content)
+                    .bind(created_at)
+                    .execute(p)
+                    .await
+                    .expect(&format!("Failed to insert version {}", version_num));
+                }
+
+                // Create a version for the other page to ensure filtering works
+                let other_version_uuid = uuid::Uuid::new_v4().to_string();
+                sqlx::query(
+                    "INSERT INTO module_docs_page_versions (uuid, page_uuid, version_number, content, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)"
+                )
+                .bind(&other_version_uuid)
+                .bind(&other_page_uuid)
+                .bind(1)
+                .bind("Other page content")
+                .bind(now)
+                .execute(p)
+                .await
+                .expect("Failed to insert other page version");
+            }
+            _ => unreachable!(),
+        }
+
+        // Test 1: List all versions (default limit)
+        let versions = list_page_versions(&pool, &page_uuid, None, None)
+            .await
+            .expect("Failed to list page versions");
+
+        assert_eq!(versions.len(), 4, "Should return all 4 versions");
+        
+        // Verify ordering by version_number DESC (highest version number first)
+        for i in 0..versions.len() - 1 {
+            assert!(
+                versions[i].version_number >= versions[i + 1].version_number,
+                "Versions should be ordered by version_number DESC (highest first)"
+            );
+        }
+
+        // Verify all versions belong to the correct page
+        for version in &versions {
+            assert_eq!(version.page_uuid, page_uuid, "Version should belong to test page");
+        }
+
+        // Verify version numbers match expected order (highest version number first should be version 4)
+        assert_eq!(versions[0].version_number, 4, "First version should be version 4 (highest)");
+        assert_eq!(versions[3].version_number, 1, "Last version should be version 1 (lowest)");
+
+        // Test 2: Pagination with limit
+        let limited_versions = list_page_versions(&pool, &page_uuid, Some(2), None)
+            .await
+            .expect("Failed to list page versions with limit");
+
+        assert_eq!(limited_versions.len(), 2, "Should return only 2 versions");
+        assert_eq!(limited_versions[0].version_number, 4, "First should be version 4");
+        assert_eq!(limited_versions[1].version_number, 3, "Second should be version 3");
+
+        // Test 3: Pagination with offset
+        let offset_versions = list_page_versions(&pool, &page_uuid, Some(2), Some(2))
+            .await
+            .expect("Failed to list page versions with offset");
+
+        assert_eq!(offset_versions.len(), 2, "Should return 2 versions");
+        assert_eq!(offset_versions[0].version_number, 2, "First should be version 2");
+        assert_eq!(offset_versions[1].version_number, 1, "Second should be version 1");
+
+        // Test 4: Empty result for non-existent page
+        let non_existent_uuid = uuid::Uuid::new_v4().to_string();
+        let empty_versions = list_page_versions(&pool, &non_existent_uuid, None, None)
+            .await
+            .expect("Should not error for non-existent page");
+
+        assert_eq!(empty_versions.len(), 0, "Should return empty list for non-existent page");
+
+        // Test 5: Verify other page's versions are not included
+        let all_versions = list_page_versions(&pool, &page_uuid, None, None)
+            .await
+            .expect("Failed to list page versions");
+
+        for version in &all_versions {
+            assert_ne!(version.page_uuid, other_page_uuid, "Should not include other page's versions");
         }
 
         Ok(())

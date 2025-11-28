@@ -24,7 +24,7 @@ use crate::folder::{
     update_folder_properties,
     CreateDocsFolderRequest, DocsFolderDatabaseError, MoveDocsFolderRequest, UpdateDocsFolderRequest,
 };
-use crate::page::{create_page, list_pages, load_page_with_version, save_page_content, CreateDocsPageRequest, DocsPageDatabaseError};
+use crate::page::{create_page, list_pages, list_page_versions, load_page_with_version, move_page, save_page_content, update_page_properties, CreateDocsPageRequest, MoveDocsPageRequest, DocsPageDatabaseError};
 use crate::tree::{get_area_tree, DocsTreeError};
 use flextide_core::user::{user_belongs_to_organization, user_has_permission};
 
@@ -62,6 +62,12 @@ where
         .route("/modules/docs/areas/{area_uuid}/tree", get(get_area_tree_endpoint))
         .route("/modules/docs/pages/{uuid}", get(get_page_endpoint))
         .route("/modules/docs/pages/{uuid}/content", put(update_page_content_endpoint))
+        .route("/modules/docs/pages/{uuid}/properties", put(update_page_properties_endpoint))
+        .route("/modules/docs/pages/{uuid}/versions", get(list_page_versions_endpoint))
+        .route(
+            "/modules/docs/pages/{uuid}/move",
+            put(move_page_endpoint),
+        )
 }
 
 async fn list_documents(
@@ -1280,7 +1286,7 @@ pub async fn create_page_endpoint(
         &org_uuid,
         &claims.user_uuid,
         request,
-        Some(&dispatcher),
+        &dispatcher,
     )
     .await
     .map_err(|e| {
@@ -1420,6 +1426,7 @@ pub async fn update_page_content_endpoint(
         &page_uuid,
         &claims.user_uuid,
         &request.content,
+        &dispatcher,
     )
     .await
     .map_err(|e| {
@@ -1471,6 +1478,250 @@ pub async fn update_page_content_endpoint(
     Ok(Json(json!({
         "message": "Page content saved successfully",
         "version_uuid": version_uuid
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListPageVersionsQuery {
+    #[serde(default = "default_limit")]
+    limit: i32,
+    #[serde(default = "default_offset")]
+    offset: i32,
+}
+
+fn default_limit() -> i32 {
+    15
+}
+
+fn default_offset() -> i32 {
+    0
+}
+
+/// List page versions with pagination
+///
+/// GET /api/modules/docs/pages/{uuid}/versions?limit=15&offset=0
+pub async fn list_page_versions_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Path(page_uuid): Path<String>,
+    Query(params): Query<ListPageVersionsQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Check if user belongs to organization
+    let belongs = user_belongs_to_organization(&pool, &claims.user_uuid, &org_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error checking organization membership: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Database error" })),
+            )
+        })?;
+
+    if !belongs {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "User does not belong to this organization" })),
+        ));
+    }
+
+    // Verify page belongs to the organization
+    let page = load_page_with_version(&pool, &page_uuid).await.map_err(|e| {
+        tracing::error!("Error loading page: {}", e);
+        match e {
+            DocsPageDatabaseError::PageNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Page not found" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to load page" })),
+            ),
+        }
+    })?;
+
+    if page.organization_uuid != org_uuid {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Page does not belong to this organization" })),
+        ));
+    }
+
+    // Use pagination parameters from query
+    let limit = params.limit;
+    let offset = params.offset;
+
+    // List versions
+    let versions = list_page_versions(&pool, &page_uuid, Some(limit), Some(offset))
+        .await
+        .map_err(|e| {
+            tracing::error!("Error listing page versions: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to list page versions" })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "versions": versions
+    })))
+}
+
+/// Update page properties
+///
+/// PUT /api/modules/docs/pages/{uuid}/properties
+pub async fn update_page_properties_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(page_uuid): Path<String>,
+    Json(request): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Extract fields from request
+    let title = request
+        .get("title")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Title is required" })),
+            )
+        })?;
+
+    let short_summary = request
+        .get("short_summary")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let auto_sync_to_vector_db = request
+        .get("auto_sync_to_vector_db")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let vcs_export_allowed = request
+        .get("vcs_export_allowed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let includes_private_data = request
+        .get("includes_private_data")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    let metadata = request
+        .get("metadata")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    // Update page properties (permission checks are done inside update_page_properties)
+    update_page_properties(
+        &pool,
+        &page_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+        title,
+        short_summary.as_deref(),
+        auto_sync_to_vector_db,
+        vcs_export_allowed,
+        includes_private_data,
+        metadata,
+        &dispatcher,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error updating page properties: {}", e);
+        match e {
+            DocsPageDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to edit page properties" })),
+            ),
+            DocsPageDatabaseError::PageNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Page not found" })),
+            ),
+            DocsPageDatabaseError::PageNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Page does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::EmptyTitle => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Title cannot be empty" })),
+            ),
+            DocsPageDatabaseError::InvalidMetadata => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Metadata must be a valid JSON object" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to update page properties" })),
+            ),
+        }
+    })?;
+
+    Ok(Json(json!({
+        "message": "Page properties updated successfully"
+    })))
+}
+
+/// Move a page to a different folder
+///
+/// PUT /api/modules/docs/pages/{uuid}/move
+pub async fn move_page_endpoint(
+    Extension(pool): Extension<DatabasePool>,
+    Extension(org_uuid): Extension<String>,
+    Extension(claims): Extension<Claims>,
+    Extension(dispatcher): Extension<EventDispatcher>,
+    Path(page_uuid): Path<String>,
+    Json(request): Json<MoveDocsPageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<JsonValue>)> {
+    // Move page (permission checks are done inside move_page)
+    move_page(
+        &pool,
+        &page_uuid,
+        &org_uuid,
+        &claims.user_uuid,
+        request.folder_uuid,
+        request.sort_order,
+        Some(&dispatcher),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error moving page: {}", e);
+        match e {
+            DocsPageDatabaseError::UserNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::PermissionDenied => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "User does not have permission to move this page" })),
+            ),
+            DocsPageDatabaseError::PageNotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Page not found" })),
+            ),
+            DocsPageDatabaseError::PageNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Page does not belong to this organization" })),
+            ),
+            DocsPageDatabaseError::AreaNotInOrganization => (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Area does not belong to this organization" })),
+            ),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to move page" })),
+            ),
+        }
+    })?;
+
+    Ok(Json(json!({
+        "message": "Page moved successfully"
     })))
 }
 

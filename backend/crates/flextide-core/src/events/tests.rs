@@ -298,3 +298,192 @@ async fn test_event_timestamp() {
     assert!(event.timestamp <= after);
 }
 
+/// Test subscriber that tracks call count for verification
+#[derive(Clone)]
+struct CallCountSubscriber {
+    event_name: String,
+    subscriber_id: String,
+    call_count: Arc<Mutex<usize>>,
+    received_events: Arc<Mutex<Vec<Event>>>,
+}
+
+impl CallCountSubscriber {
+    fn new(event_name: impl Into<String>, subscriber_id: impl Into<String>) -> Self {
+        Self {
+            event_name: event_name.into(),
+            subscriber_id: subscriber_id.into(),
+            call_count: Arc::new(Mutex::new(0)),
+            received_events: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    async fn get_call_count(&self) -> usize {
+        *self.call_count.lock().await
+    }
+
+    async fn get_received_events(&self) -> Vec<Event> {
+        self.received_events.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl EventSubscriber for CallCountSubscriber {
+    async fn handle_event(&self, event: &Event) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        *self.call_count.lock().await += 1;
+        self.received_events.lock().await.push(event.clone());
+        Ok(())
+    }
+
+    fn event_name(&self) -> &str {
+        &self.event_name
+    }
+
+    fn subscriber_id(&self) -> &str {
+        &self.subscriber_id
+    }
+}
+
+/// Test the full event workflow: register handler -> emit event -> verify handler called exactly once
+#[tokio::test]
+async fn test_full_event_workflow_single_handler() {
+    // Step 1: Create dispatcher and handler
+    let dispatcher = EventDispatcher::new();
+    let handler = CallCountSubscriber::new("user.created", "handler-1");
+
+    // Step 2: Register the handler
+    dispatcher.subscribe(Box::new(handler.clone()));
+
+    // Verify handler is registered
+    assert_eq!(dispatcher.subscriber_count("user.created"), 1);
+    assert_eq!(handler.get_call_count().await, 0);
+
+    // Step 3: Emit an event with the same event name
+    let event = Event::new(
+        "user.created",
+        EventPayload::new(json!({
+            "user_id": "123",
+            "email": "test@example.com"
+        })),
+    );
+    dispatcher.emit(event.clone()).await;
+
+    // Step 4: Verify handler was called exactly once
+    assert_eq!(handler.get_call_count().await, 1, "Handler should be called exactly once");
+
+    // Verify the handler received the correct event
+    let received = handler.get_received_events().await;
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0].name, "user.created");
+    assert_eq!(received[0].payload.data["user_id"], "123");
+    assert_eq!(received[0].payload.data["email"], "test@example.com");
+}
+
+/// Test multiple handlers for the same event name - all should be called exactly once
+#[tokio::test]
+async fn test_full_event_workflow_multiple_handlers() {
+    // Step 1: Create dispatcher and multiple handlers for the same event
+    let dispatcher = EventDispatcher::new();
+    let handler1 = CallCountSubscriber::new("project.updated", "handler-1");
+    let handler2 = CallCountSubscriber::new("project.updated", "handler-2");
+    let handler3 = CallCountSubscriber::new("project.updated", "handler-3");
+
+    // Step 2: Register all handlers
+    dispatcher.subscribe(Box::new(handler1.clone()));
+    dispatcher.subscribe(Box::new(handler2.clone()));
+    dispatcher.subscribe(Box::new(handler3.clone()));
+
+    // Verify all handlers are registered
+    assert_eq!(dispatcher.subscriber_count("project.updated"), 3);
+    assert_eq!(handler1.get_call_count().await, 0);
+    assert_eq!(handler2.get_call_count().await, 0);
+    assert_eq!(handler3.get_call_count().await, 0);
+
+    // Step 3: Emit a single event
+    let event = Event::new(
+        "project.updated",
+        EventPayload::new(json!({
+            "project_id": "456",
+            "name": "My Project",
+            "status": "active"
+        })),
+    );
+    dispatcher.emit(event.clone()).await;
+
+    // Step 4: Verify all handlers were called exactly once
+    assert_eq!(handler1.get_call_count().await, 1, "Handler 1 should be called exactly once");
+    assert_eq!(handler2.get_call_count().await, 1, "Handler 2 should be called exactly once");
+    assert_eq!(handler3.get_call_count().await, 1, "Handler 3 should be called exactly once");
+
+    // Verify all handlers received the correct event
+    let received1 = handler1.get_received_events().await;
+    let received2 = handler2.get_received_events().await;
+    let received3 = handler3.get_received_events().await;
+
+    assert_eq!(received1.len(), 1);
+    assert_eq!(received2.len(), 1);
+    assert_eq!(received3.len(), 1);
+
+    assert_eq!(received1[0].name, "project.updated");
+    assert_eq!(received2[0].name, "project.updated");
+    assert_eq!(received3[0].name, "project.updated");
+
+    assert_eq!(received1[0].payload.data["project_id"], "456");
+    assert_eq!(received2[0].payload.data["project_id"], "456");
+    assert_eq!(received3[0].payload.data["project_id"], "456");
+}
+
+/// Test that handlers are not called for different event names
+#[tokio::test]
+async fn test_handlers_not_called_for_different_events() {
+    let dispatcher = EventDispatcher::new();
+    let handler1 = CallCountSubscriber::new("event.a", "handler-1");
+    let handler2 = CallCountSubscriber::new("event.b", "handler-2");
+
+    dispatcher.subscribe(Box::new(handler1.clone()));
+    dispatcher.subscribe(Box::new(handler2.clone()));
+
+    // Emit event.a - only handler1 should be called
+    let event_a = Event::new("event.a", EventPayload::new(json!({})));
+    dispatcher.emit(event_a).await;
+
+    assert_eq!(handler1.get_call_count().await, 1, "Handler 1 should be called for event.a");
+    assert_eq!(handler2.get_call_count().await, 0, "Handler 2 should NOT be called for event.a");
+
+    // Emit event.b - only handler2 should be called
+    let event_b = Event::new("event.b", EventPayload::new(json!({})));
+    dispatcher.emit(event_b).await;
+
+    assert_eq!(handler1.get_call_count().await, 1, "Handler 1 should still be called only once");
+    assert_eq!(handler2.get_call_count().await, 1, "Handler 2 should be called for event.b");
+}
+
+/// Test that emitting multiple events calls handlers multiple times
+#[tokio::test]
+async fn test_multiple_emissions_call_handlers_multiple_times() {
+    let dispatcher = EventDispatcher::new();
+    let handler = CallCountSubscriber::new("task.completed", "handler-1");
+
+    dispatcher.subscribe(Box::new(handler.clone()));
+
+    // Emit the same event multiple times
+    for i in 0..5 {
+        let event = Event::new(
+            "task.completed",
+            EventPayload::new(json!({"task_id": i})),
+        );
+        dispatcher.emit(event).await;
+    }
+
+    // Handler should be called 5 times
+    assert_eq!(handler.get_call_count().await, 5, "Handler should be called 5 times for 5 events");
+
+    let received = handler.get_received_events().await;
+    assert_eq!(received.len(), 5);
+
+    // Verify all events were received
+    for (i, event) in received.iter().enumerate() {
+        assert_eq!(event.name, "task.completed");
+        assert_eq!(event.payload.data["task_id"], i);
+    }
+}
+

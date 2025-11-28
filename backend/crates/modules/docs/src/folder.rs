@@ -402,7 +402,7 @@ pub async fn get_all_folders(
 }
 
 /// Load a folder by UUID
-async fn load_folder_by_uuid(
+pub async fn load_folder_by_uuid(
     pool: &DatabasePool,
     folder_uuid: &str,
 ) -> Result<DocsFolder, DocsFolderDatabaseError> {

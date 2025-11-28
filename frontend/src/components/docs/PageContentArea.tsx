@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { getDocsPage, updatePageContent, type DocsPageWithVersion } from "@/lib/api";
-import { showToast } from "@/lib/toast";
 
 interface PageContentAreaProps {
   pageUuid: string | null;
@@ -43,6 +42,21 @@ export function PageContentArea({ pageUuid, pageType }: PageContentAreaProps) {
   const handleSave = async (content: string) => {
     if (!pageUuid) return;
     await updatePageContent(pageUuid, { content });
+  };
+
+  const handlePageUpdate = async () => {
+    if (!pageUuid) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await getDocsPage(pageUuid);
+      setPage(response.page);
+    } catch (err) {
+      console.error("Failed to reload page:", err);
+      setError(err instanceof Error ? err.message : "Failed to reload page");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!pageUuid) {
@@ -92,6 +106,9 @@ export function PageContentArea({ pageUuid, pageType }: PageContentAreaProps) {
           content={content}
           onSave={handleSave}
           placeholder="Start writing your markdown content..."
+          pageUuid={pageUuid}
+          page={page}
+          onPageUpdate={handlePageUpdate}
         />
       </div>
     );
@@ -102,7 +119,7 @@ export function PageContentArea({ pageUuid, pageType }: PageContentAreaProps) {
     <div className="flex items-center justify-center h-full">
       <div className="text-center">
         <p className="text-flextide-neutral-text-medium">
-          Editor for page type "{pageType}" is not yet implemented.
+          Editor for page type &quot;{pageType}&quot; is not yet implemented.
         </p>
       </div>
     </div>
