@@ -2173,6 +2173,51 @@ export interface MoveDocsFolderRequest {
   sort_order: number;
 }
 
+export interface MoveDocsPageRequest {
+  folder_uuid: string | null;
+  sort_order: number;
+}
+
+export async function moveDocsPage(
+  pageUuid: string,
+  request: MoveDocsPageRequest
+): Promise<{ message: string }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/pages/${pageUuid}/move`),
+      {
+        method: 'PUT',
+        headers: getApiHeaders(`/api/modules/docs/pages/${pageUuid}/move`),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to move docs page:', error);
+    throw error;
+  }
+}
+
 export async function moveDocsFolder(
   folderUuid: string,
   request: MoveDocsFolderRequest
@@ -2362,6 +2407,114 @@ export async function getDocsPage(pageUuid: string): Promise<{ page: DocsPageWit
       throw new Error('Network error: Unable to connect to the server');
     }
     console.error('Failed to get docs page:', error);
+    throw error;
+  }
+}
+
+/**
+ * List page versions with pagination
+ * 
+ * @param pageUuid - UUID of the page
+ * @param limit - Maximum number of versions to return (default: 15)
+ * @param offset - Number of versions to skip (default: 0)
+ * @returns Promise with versions array
+ */
+export async function listPageVersions(
+  pageUuid: string,
+  limit: number = 15,
+  offset: number = 0
+): Promise<{ versions: Array<{
+  uuid: string;
+  page_uuid: string;
+  version_number: number;
+  created_at: string;
+  last_updated: string | null;
+}> }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/pages/${pageUuid}/versions?limit=${limit}&offset=${offset}`),
+      {
+        method: 'GET',
+        headers: getApiHeaders(`/api/modules/docs/pages/${pageUuid}/versions`),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to list page versions:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update page properties
+ * 
+ * @param pageUuid - UUID of the page
+ * @param request - Page properties update request
+ * @returns Promise with success message
+ */
+export async function updatePageProperties(
+  pageUuid: string,
+  request: {
+    title: string;
+    short_summary?: string | null;
+    auto_sync_to_vector_db: boolean;
+    vcs_export_allowed: boolean;
+    includes_private_data: boolean;
+    metadata: Record<string, any>;
+  }
+): Promise<{ message: string }> {
+  try {
+    const response = await fetch(
+      getApiEndpoint(`/api/modules/docs/pages/${pageUuid}/properties`),
+      {
+        method: 'PUT',
+        headers: getApiHeaders(`/api/modules/docs/pages/${pageUuid}/properties`),
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch {
+          // Keep the default error message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (handleNetworkError(error)) {
+      throw new Error('Network error: Unable to connect to the server');
+    }
+    console.error('Failed to update page properties:', error);
     throw error;
   }
 }

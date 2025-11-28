@@ -11,12 +11,13 @@ pub use area::{
 };
 pub use folder::{
     CreateDocsFolderRequest, DocsFolder, DocsFolderDatabaseError, MoveDocsFolderRequest, UpdateDocsFolderRequest,
-    create_folder, delete_folder, get_all_folders, list_folders, move_folder, reorder_folder, update_folder, update_folder_name,
+    create_folder, delete_folder, get_all_folders, list_folders, load_folder_by_uuid, move_folder, reorder_folder, update_folder, update_folder_name,
 };
 pub use page::{
-    CreateDocsPageRequest, DocsPage, DocsPageDatabaseError, DocsPageVersion,
+    CreateDocsPageRequest, MoveDocsPageRequest, DocsPage, DocsPageDatabaseError, DocsPageVersion,
     DocsPageWithVersion, create_page, delete_page, generate_page_summary, get_all_pages, get_page_user_permissions,
-    list_pages, load_page_with_version, save_page_content, save_page_summary,
+    list_pages, list_page_versions, load_page_with_version, move_page, save_page_content, save_page_summary,
+    update_page_properties,
 };
 pub use summary::{
     ClaudePageSummaryGenerator, GeminiPageSummaryGenerator, OpenAIPageSummaryGenerator,

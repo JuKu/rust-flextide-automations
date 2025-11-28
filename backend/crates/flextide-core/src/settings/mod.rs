@@ -4,5 +4,8 @@
 
 mod database;
 
-pub use database::{get_organizational_setting_value, SettingsDatabaseError};
+pub use database::{
+    get_organizational_setting_value, set_organizational_setting_value,
+    set_organizational_setting_values, SettingsDatabaseError,
+};
 
